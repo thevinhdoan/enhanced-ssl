@@ -48,7 +48,6 @@ class AlgorithmBase:
         self.num_classes = args.num_classes
         self.ema_m = args.ema_m
         self.epochs = args.epoch
-        self.actual_epochs = args.actual_epochs
         self.num_train_iter = args.num_train_iter
         self.num_eval_iter = args.num_eval_iter
         self.num_log_iter = args.num_log_iter
@@ -428,9 +427,6 @@ class AlgorithmBase:
     def _check_stop(self):
         if self.it >= self.num_train_iter:
             self.print_fn("***************** Iteration limit reached")
-            return True
-        if self.actual_epochs > 0 and self.epoch >= self.actual_epochs:
-            self.print_fn("***************** Actual epoch limit reached")
             return True
         if self.early_stop:
             if self.resume_es == False:
