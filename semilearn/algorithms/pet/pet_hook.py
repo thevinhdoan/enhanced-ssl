@@ -209,7 +209,7 @@ class PETHook(Hook):
             assert np.all(y_true == _y_true), 'Pseudo label error!'
 
         # Format pl
-        pl = np.empty(scores.shape[0], dtype=np.int)
+        pl = np.empty(scores.shape[0], dtype=np.int32)
         for _idx, (_y, score) in enumerate(zip(y_true, scores)):
             pl[_idx] = _score_to_pl(score)
         
