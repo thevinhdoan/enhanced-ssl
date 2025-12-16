@@ -273,6 +273,11 @@ def get_config():
     # check config
     parser.add_argument("--check_config", action="store_true")
 
+    # robust clustering loss (optional; defaults keep behavior unchanged)
+    parser.add_argument("--lambda_1", type=float, default=0.0, help="Weight for alignment term in optional robust loss")
+    parser.add_argument("--lambda_2", type=float, default=0.0, help="Weight for robustness term in optional robust loss")
+    parser.add_argument("--grouping_update_interval", type=int, default=5, help="Recompute clustering every N epochs when robust loss is enabled")
+
     # add algorithm specific parameters
     args = parser.parse_args()
     over_write_args_from_file(args, args.c)
