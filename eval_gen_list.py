@@ -27,6 +27,8 @@ if __name__ == '__main__':
 
     _CONFIG_ROOT = './config/'
     for root, dirs, files in os.walk(_CONFIG_ROOT):
+        if 'pet' in root: # ignore configs newly created for PET & V-PET
+            continue
         if not 'config.yaml' in files:
             continue
         _config_path = os.path.join(root, 'config.yaml')
@@ -38,4 +40,4 @@ if __name__ == '__main__':
     
     with open('eval_list.pkl', 'wb') as f:
         pickle.dump(eval_list, f)
-    print(f'Saved {len(eval_list)} models to extract_pl_list.pkl')
+    print(f'Saved {len(eval_list)} models to eval_list.pkl')

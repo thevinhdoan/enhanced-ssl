@@ -221,7 +221,7 @@ def get_pet_sources(strategy, dset, shot, peft, net, rows):
             row_dset = row[2]
             row_shot = row[3]
             row_net = row[4]
-            if 'supervisped' in row_alg and row_dset == dset and row_shot == shot and row_net == net:
+            if 'supervised' in row_alg and row_dset == dset and row_shot == shot and row_net == net:
                 k = str((row_peft, row_alg, row_dset, row_shot, row_net))
                 candidate_rows[k].append(row)
         if len(candidate_rows) == 0:
