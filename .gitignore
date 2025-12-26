@@ -1,5 +1,6 @@
 archive*
 data*
+!datasets*
 pretrain_weight*
 saved_models*
 *.ipynb
