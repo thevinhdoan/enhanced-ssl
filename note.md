@@ -1,0 +1,1 @@
+1. In `gen_config_pet.py`, uncomment the n-shot that is not needed and add if-else to select only (dataset, n-shot) to create configs for
