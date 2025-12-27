@@ -311,8 +311,8 @@ class PET(AlgorithmBase):
                 pl = self.pl[i_round]['pl']
                 y_true = self.pl[i_round]['y_true']
                 distill_scores = self.pl[i_round]['distill_scores']
-                pl = torch.tensor(pl).cuda(self.gpu)
-                y_true = torch.tensor(y_true).cuda(self.gpu)
+                pl = torch.tensor(pl).long().cuda(self.gpu)
+                y_true = torch.tensor(y_true).long().cuda(self.gpu)
                 distill_scores = torch.tensor(distill_scores).cuda(self.gpu)
 
 
