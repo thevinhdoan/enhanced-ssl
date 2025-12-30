@@ -1,0 +1,103 @@
+algorithm: pet
+save_dir: 
+  ./saved_models/config/adaptformer/pet-ensembled/diabetic_retinopathy/40-shot/dinov2
+save_name: log
+resume: true
+load_path: 
+  ./saved_models/config/adaptformer/pet-ensembled/diabetic_retinopathy/40-shot/dinov2/log/latest_model.pth
+overwrite: true
+use_tensorboard: true
+use_wandb: false
+epoch: 30
+num_train_iter: 42990
+num_log_iter: 358
+num_eval_iter: 2866
+batch_size: 8
+eval_batch_size: 16
+num_warmup_iter: 1074
+num_labels: 200
+ema_m: 0.0
+img_size: 224
+crop_ratio: 0.875
+optim: AdamW
+lr: 0.0001
+layer_decay: 1.0
+momentum: 0.9
+weight_decay: 0.0005
+amp: false
+clip: 0.0
+use_cat: true
+net: timm/vit_base_patch14_reg4_dinov2.lvd142m
+net_from_name: false
+data_dir: ./data
+dataset: diabetic_retinopathy
+train_sampler: RandomSampler
+num_classes: 5
+num_workers: 4
+seed: 0
+world_size: 1
+rank: 0
+gpu: None
+use_pretrain: true
+# VTAB settings
+train_split: train
+eval_on_test: true
+evaluate_unsupervised: false
+es_patience: 0.0
+# PET settings
+w_alpha: 0.0
+s_alpha: 0.0
+kd_w_alpha: 1.0
+kd_s_alpha: 1.0
+temperature: 1.0
+budget: 1.0
+pet_sources:
+- "config/lora/supervised/diabetic_retinopathy/40-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck':
+  16}/lr-1e-3/config.yaml"
+- "config/adaptformer/supervised/diabetic_retinopathy/40-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler':
+  0.1, 'adapter_bottleneck': 4}/lr-1e-3/config.yaml"
+pl_selection: balanced-max
+logits_ensemble: voting
+bootstrapping: true
+peft_config:
+  method_name: adaptformer
+  ft_mlp_module: adapter
+  ft_mlp_mode: parallel
+  ft_mlp_ln: before
+  adapter_init: lora_kaiming
+  adapter_bottleneck: 16
+  adapter_scaler: 0.1
+vit_config:
+  drop_path_rate: 0.0
+pet_sources_rows:
+- - lora
+  - supervised
+  - diabetic_retinopathy
+  - 40-shot
+  - dinov2
+  - "['dpr-0', 'train-aug-strong', \"{'lora_bottleneck': 16}\", 'lr-1e-3']"
+  - 514.6663818359375
+  - 0.19070151450979053
+  - 0.10562214139521255
+  - 0.19119514116993105
+  - 0.3478499413191731
+  - 403.6553649902344
+  - 0.0178240817040205
+  - 0.2796812653541565
+  - '2025-12-30 18:02:34'
+- - adaptformer
+  - supervised
+  - diabetic_retinopathy
+  - 40-shot
+  - dinov2
+  - "['dpr-0.2', 'train-aug-strong', \"{'adapter_scaler': 0.1, 'adapter_bottleneck':
+    4}\", 'lr-1e-3']"
+  - 274.38507080078125
+  - 0.1343611966072932
+  - 0.08802180165221453
+  - 0.13494267921400982
+  - 0.3829659672238343
+  - 676.703369140625
+  - 0.010739429853856564
+  - 0.26742443442344666
+  - '2025-12-30 18:02:35'

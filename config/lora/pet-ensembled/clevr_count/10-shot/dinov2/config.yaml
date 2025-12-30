@@ -1,0 +1,97 @@
+algorithm: pet
+save_dir: ./saved_models/config/lora/pet-ensembled/clevr_count/10-shot/dinov2
+save_name: log
+resume: true
+load_path: 
+  ./saved_models/config/lora/pet-ensembled/clevr_count/10-shot/dinov2/log/latest_model.pth
+overwrite: true
+use_tensorboard: true
+use_wandb: false
+epoch: 30
+num_train_iter: 65550
+num_log_iter: 546
+num_eval_iter: 4370
+batch_size: 8
+eval_batch_size: 16
+num_warmup_iter: 1638
+num_labels: 80
+ema_m: 0.0
+img_size: 224
+crop_ratio: 0.875
+optim: AdamW
+lr: 0.0001
+layer_decay: 1.0
+momentum: 0.9
+weight_decay: 0.0005
+amp: false
+clip: 0.0
+use_cat: true
+net: timm/vit_base_patch14_reg4_dinov2.lvd142m
+net_from_name: false
+data_dir: ./data
+dataset: clevr_count
+train_sampler: RandomSampler
+num_classes: 8
+num_workers: 4
+seed: 0
+world_size: 1
+rank: 0
+gpu: None
+use_pretrain: true
+# VTAB settings
+train_split: train
+eval_on_test: true
+evaluate_unsupervised: false
+es_patience: 0.0
+# PET settings
+w_alpha: 0.0
+s_alpha: 0.0
+kd_w_alpha: 1.0
+kd_s_alpha: 1.0
+temperature: 1.0
+budget: 1.0
+pet_sources:
+- "config/lora/supervised/clevr_count/10-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck':
+  16}/lr-1e-3/config.yaml"
+- "config/adaptformer/supervised/clevr_count/10-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler':
+  0.1, 'adapter_bottleneck': 4}/lr-1e-3/config.yaml"
+pl_selection: balanced-max
+logits_ensemble: voting
+bootstrapping: true
+peft_config:
+  method_name: lora
+  lora_bottleneck: 4
+vit_config:
+  drop_path_rate: 0.0
+pet_sources_rows:
+- - lora
+  - supervised
+  - clevr_count
+  - 10-shot
+  - dinov2
+  - "['dpr-0', 'train-aug-strong', \"{'lora_bottleneck': 16}\", 'lr-1e-3']"
+  - 472.7460632324219
+  - 0.3212983057390223
+  - 0.19406042381923685
+  - 0.32188059130735974
+  - 0.3016207095442637
+  - 684.9835205078125
+  - 0.018491052091121674
+  - 0.31786665320396423
+  - '2025-12-30 18:02:33'
+- - adaptformer
+  - supervised
+  - clevr_count
+  - 10-shot
+  - dinov2
+  - "['dpr-0.2', 'train-aug-strong', \"{'adapter_scaler': 0.1, 'adapter_bottleneck':
+    4}\", 'lr-1e-3']"
+  - 256.1965026855469
+  - 0.248095972776465
+  - 0.11656213631347569
+  - 0.24881563195761594
+  - 0.2968206548795702
+  - 1196.4356689453125
+  - 0.008476387709379196
+  - 0.20559999346733093
+  - '2025-12-30 18:02:34'
