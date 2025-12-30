@@ -11,7 +11,7 @@ epoch: 35
 num_train_iter: 3815
 num_log_iter: 27
 num_eval_iter: 218
-batch_size: 16
+batch_size: 8
 eval_batch_size: 16
 num_warmup_iter: 95
 num_labels: 282
