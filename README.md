@@ -1,3 +1,5 @@
+*(Disclaimer: This repository is forked from the implementation of the paper `Revisiting semi-supervised learning in the era of foundation models`) with the intention of experimenting with integrating my own theory-backed regularizer in the context of semi-supervised learning. All rights to the original code go to the rightful original owners.)*
+
 # Revisiting Semi-Supervised Learning in the Era of Foundation Models
 
 __Official implementation of the following work:__
