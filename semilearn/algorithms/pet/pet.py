@@ -3,6 +3,7 @@
 
 from semilearn.core import AlgorithmBase
 from semilearn.core.utils import ALGORITHMS
+from semilearn.datasets import get_collactor
 from .pet_hook import PETHook
 
 import copy
@@ -13,6 +14,7 @@ import pprint
 import time
 
 from torch.nn import functional as F
+from torch.utils.data._utils.collate import default_collate
 
 
 def _extract_embeddings(model, loader, idx_list, device):
@@ -119,6 +121,14 @@ class PET(AlgorithmBase):
         self.robust_centroid_logits = {}
         self.robust_lb_targets = {}
         self.robust_lb_idx_list = None
+        self.robust_ulb_idx_list = None
+        self.robust_centroid_to_ulb_pos = {}
+        self._ulb_collate_fn = get_collactor(args, args.net)
+        self._robust_base_seed = getattr(args, "seed", None)
+        if self._robust_base_seed is None:
+            self._robust_rng = np.random.RandomState()
+        else:
+            self._robust_rng = np.random.RandomState(int(self._robust_base_seed) + int(self.rank))
 
     def reset_model(self):
         assert self._model is not None, "Model is not initialized"
@@ -159,10 +169,49 @@ class PET(AlgorithmBase):
         self.robust_ulb2centroid = _compute_grouping(clustering_model, lb_loader, ulb_loader, lb_indices, ulb_indices, device)
         self.robust_centroid_logits = _compute_centroid_logits(clustering_model, lb_loader, lb_indices, device)
         self.robust_lb_idx_list = lb_indices
+        self.robust_ulb_idx_list = ulb_indices
+        self.robust_centroid_to_ulb_pos = {int(lb_idx): [] for lb_idx in lb_indices}
+        ulb_actual_to_pos = {int(actual_idx): pos for pos, actual_idx in enumerate(ulb_indices)}
+        for ulb_actual, lb_actual in self.robust_ulb2centroid.items():
+            ulb_pos = ulb_actual_to_pos.get(int(ulb_actual))
+            if ulb_pos is not None:
+                self.robust_centroid_to_ulb_pos[int(lb_actual)].append(int(ulb_pos))
         # cache targets for centroids
         lb_targets = lb_loader.dataset.targets
         self.robust_lb_targets = {int(idx): int(target) for idx, target in zip(lb_indices, lb_targets)}
         self.print_fn(f"Refreshed robust grouping: {len(self.robust_ulb2centroid)} unlabeled assignments, {len(self.robust_centroid_logits)} centroids.")
+
+    def _sample_ulb_positions_for_lb(self, idx_lb):
+        if not self.robust_centroid_to_ulb_pos or self.robust_lb_idx_list is None:
+            return None
+        ulb_positions = []
+        lb_positions = idx_lb.tolist()
+        for lb_pos in lb_positions:
+            if lb_pos < 0 or lb_pos >= len(self.robust_lb_idx_list):
+                continue
+            lb_actual = int(self.robust_lb_idx_list[lb_pos])
+            candidates = self.robust_centroid_to_ulb_pos.get(lb_actual, [])
+            if not candidates:
+                continue
+            n_pick = int(self.args.uratio)
+            if len(candidates) >= n_pick:
+                picks = self._robust_rng.choice(candidates, size=n_pick, replace=False).tolist()
+            else:
+                picks = self._robust_rng.choice(candidates, size=n_pick, replace=True).tolist()
+            ulb_positions.extend(picks)
+        if not ulb_positions:
+            return None
+        return ulb_positions
+
+    def _build_ulb_batch_from_positions(self, ulb_positions):
+        ulb_dset = self.loader_dict['train_ulb'].dataset
+        samples = [ulb_dset[pos] for pos in ulb_positions]
+        collate_fn = self._ulb_collate_fn
+        if collate_fn is None:
+            collate_fn = getattr(self.loader_dict['train_ulb'], "collate_fn", None)
+        if collate_fn is None:
+            collate_fn = default_collate
+        return collate_fn(samples)
 
     def train_step(self, idx_ulb, x_ulb, x_ulb_w, x_ulb_s, pl_ulb, distill_scores_ulb, y_true_ulb):
         # import pdb; pdb.set_trace()
@@ -304,9 +353,12 @@ class PET(AlgorithmBase):
                 self.print_fn(f"Epoch {self.epoch}/{self.epochs}")
 
                 self.call_hook("before_train_epoch")
+                if self._robust_base_seed is not None:
+                    self._robust_rng = np.random.RandomState(int(self._robust_base_seed) + int(self.rank) + int(self.epoch))
                 if self.robust_enable and (self.grouping_update_interval == 0 or epoch % self.grouping_update_interval == 0):
                     self._refresh_robust_grouping()
                 ulb_iter = iter(self.loader_dict['train_ulb'])
+                lb_iter = iter(self.loader_dict['train_lb'])
 
                 pl = self.pl[i_round]['pl']
                 y_true = self.pl[i_round]['y_true']
@@ -317,11 +369,23 @@ class PET(AlgorithmBase):
 
 
                 try:
-                    for data_ulb in ulb_iter:
+                    for data_lb in lb_iter:
                         # prevent the training iterations exceed args.num_train_iter
                         if self._check_stop():
                             print("***************** Stopped")
                             break
+
+                        data_ulb = None
+                        if self.robust_enable:
+                            ulb_positions = self._sample_ulb_positions_for_lb(data_lb['idx_lb'])
+                            if ulb_positions is not None:
+                                data_ulb = self._build_ulb_batch_from_positions(ulb_positions)
+                        if data_ulb is None:
+                            try:
+                                data_ulb = next(ulb_iter)
+                            except StopIteration:
+                                ulb_iter = iter(self.loader_dict['train_ulb'])
+                                data_ulb = next(ulb_iter)
 
                         idx_ulb = data_ulb['idx_ulb']
 
