@@ -1,0 +1,97 @@
+algorithm: pet
+save_dir: ./saved_models/config/lora/pet-ensembled/dtd/1-shot/clip
+save_name: log
+resume: true
+load_path: 
+  ./saved_models/config/lora/pet-ensembled/dtd/1-shot/clip/log/latest_model.pth
+overwrite: true
+use_tensorboard: true
+use_wandb: false
+epoch: 30
+num_train_iter: 3270
+num_log_iter: 27
+num_eval_iter: 218
+batch_size: 8
+eval_batch_size: 16
+num_warmup_iter: 81
+num_labels: 47
+ema_m: 0.0
+img_size: 224
+crop_ratio: 0.875
+optim: AdamW
+lr: 0.0001
+layer_decay: 1.0
+momentum: 0.9
+weight_decay: 0.0005
+amp: false
+clip: 0.0
+use_cat: true
+net: timm/vit_base_patch16_clip_224.openai
+net_from_name: false
+data_dir: ./data
+dataset: dtd
+train_sampler: RandomSampler
+num_classes: 47
+num_workers: 4
+seed: 0
+world_size: 1
+rank: 0
+gpu: None
+use_pretrain: true
+# VTAB settings
+train_split: train
+eval_on_test: true
+evaluate_unsupervised: false
+es_patience: 0.0
+# PET settings
+w_alpha: 0.0
+s_alpha: 0.0
+kd_w_alpha: 1.0
+kd_s_alpha: 1.0
+temperature: 1.0
+budget: 1.0
+pet_sources:
+- "config/adaptformer/supervised/dtd/1-shot/clip/dpr-0/train-aug-strong/{'adapter_scaler':
+  0.1, 'adapter_bottleneck': 16}/lr-1e-3/config.yaml"
+- "config/lora/supervised/dtd/1-shot/clip/dpr-0/train-aug-strong/{'lora_bottleneck':
+  16}/lr-1e-3/config.yaml"
+pl_selection: balanced-max
+logits_ensemble: voting
+bootstrapping: true
+peft_config:
+  method_name: lora
+  lora_bottleneck: 4
+vit_config:
+  drop_path_rate: 0.0
+pet_sources_rows:
+- - adaptformer
+  - supervised
+  - dtd
+  - 1-shot
+  - clip
+  - "['dpr-0', 'train-aug-strong', \"{'adapter_scaler': 0.1, 'adapter_bottleneck':
+    16}\", 'lr-1e-3']"
+  - 401.56597900390625
+  - 0.5116286148228381
+  - 0.32472070620342486
+  - 0.6601064819143801
+  - 0.34304288278867556
+  - 10.65220838122466
+  - 0.12252345681190491
+  - 0.4095744788646698
+  - '2026-01-23 06:08:05'
+- - lora
+  - supervised
+  - dtd
+  - 1-shot
+  - clip
+  - "['dpr-0', 'train-aug-strong', \"{'lora_bottleneck': 16}\", 'lr-1e-3']"
+  - 398.55914306640625
+  - 0.5246001697869503
+  - 0.33934847708607274
+  - 0.6689898708543006
+  - 0.35752184656265085
+  - 10.542519044428634
+  - 0.13254722952842712
+  - 0.4159574508666992
+  - '2026-01-23 06:08:05'
