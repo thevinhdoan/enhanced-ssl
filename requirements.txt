@@ -17,5 +17,5 @@ transformers>=4.30.0
 wandb
 aim
 dotwiz
-pytorch-metric-learning
+pytorch-metric-learning==2.9.0
 pytorch-adapt
