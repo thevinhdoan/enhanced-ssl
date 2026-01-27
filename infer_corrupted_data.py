@@ -397,8 +397,13 @@ def _ensure_data_available(data_dir, dataset):
         expected = _expected_vtab_list(candidate, dataset, "test")
         if os.path.exists(expected):
             return candidate
+    if base != "vtab":
+        candidate = os.path.join(data_dir, "vtab")
+        expected = _expected_vtab_list(candidate, dataset, "test")
+        if os.path.exists(expected):
+            return candidate
     raise FileNotFoundError(
-        f"VTAB test list not found at {expected}. Ensure --data_dir points to a data/ folder."
+        f"VTAB test list not found at {expected}. Ensure --data_dir points to a data/ or vtab/ folder."
     )
 
 
@@ -642,7 +647,11 @@ def main():
     parser = argparse.ArgumentParser(description="Run inference on the VTAB test set.")
     parser.add_argument("-c", "--config", default=None, help="Path to config yaml used for training.")
     parser.add_argument("--checkpoint", default=None, help="Override checkpoint path.")
-    parser.add_argument("--data_dir", default=None, help="Override data root (data/ folder with vtab/, or parent of data/).")
+    parser.add_argument(
+        "--data_dir",
+        default=None,
+        help="Override data root (data/ or vtab/ folder, or their parent).",
+    )
     parser.add_argument("--batch_size", type=int, default=None, help="Override eval batch size.")
     parser.add_argument("--num_workers", type=int, default=4, help="DataLoader workers.")
     parser.add_argument("--device", default="cuda:0", help="cuda:0 or cpu.")
