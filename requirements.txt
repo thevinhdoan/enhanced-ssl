@@ -19,3 +19,4 @@ aim
 dotwiz
 pytorch-metric-learning==2.9.0
 pytorch-adapt
+faiss-cpu==1.13.2
