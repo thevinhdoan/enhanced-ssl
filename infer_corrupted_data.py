@@ -402,8 +402,13 @@ def _ensure_data_available(data_dir, dataset):
         expected = _expected_vtab_list(candidate, dataset, "test")
         if os.path.exists(expected):
             return candidate
+    if base != "vtab_release":
+        candidate = os.path.join(data_dir, "vtab_release")
+        expected = _expected_vtab_list(candidate, dataset, "test")
+        if os.path.exists(expected):
+            return candidate
     raise FileNotFoundError(
-        f"VTAB test list not found at {expected}. Ensure --data_dir points to a data/ or vtab/ folder."
+        f"VTAB test list not found at {expected}. Ensure --data_dir points to a data/, vtab/, or vtab_release/ folder."
     )
 
 
@@ -650,7 +655,7 @@ def main():
     parser.add_argument(
         "--data_dir",
         default=None,
-        help="Override data root (data/ or vtab/ folder, or their parent).",
+        help="Override data root (data/, vtab/, or vtab_release/ folder, or their parent).",
     )
     parser.add_argument("--batch_size", type=int, default=None, help="Override eval batch size.")
     parser.add_argument("--num_workers", type=int, default=4, help="DataLoader workers.")
