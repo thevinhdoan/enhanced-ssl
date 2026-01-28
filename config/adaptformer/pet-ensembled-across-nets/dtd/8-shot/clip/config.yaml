@@ -1,0 +1,138 @@
+algorithm: pet
+save_dir: 
+  ./saved_models/config/adaptformer/pet-ensembled-across-nets/dtd/8-shot/clip
+save_name: log
+resume: true
+load_path: 
+  ./saved_models/config/adaptformer/pet-ensembled-across-nets/dtd/8-shot/clip/log/latest_model.pth
+overwrite: true
+use_tensorboard: true
+use_wandb: false
+epoch: 30
+num_train_iter: 3270
+num_log_iter: 27
+num_eval_iter: 218
+batch_size: 8
+eval_batch_size: 16
+num_warmup_iter: 81
+num_labels: 376
+ema_m: 0.0
+img_size: 224
+crop_ratio: 0.875
+optim: AdamW
+lr: 0.0001
+layer_decay: 1.0
+momentum: 0.9
+weight_decay: 0.0005
+amp: false
+clip: 0.0
+use_cat: true
+net: timm/vit_base_patch16_clip_224.openai
+net_from_name: false
+data_dir: ./data
+dataset: dtd
+train_sampler: RandomSampler
+num_classes: 47
+num_workers: 4
+seed: 0
+world_size: 1
+rank: 0
+gpu: None
+use_pretrain: true
+# VTAB settings
+train_split: train
+eval_on_test: true
+evaluate_unsupervised: false
+es_patience: 0.0
+# PET settings
+w_alpha: 0.0
+s_alpha: 0.0
+kd_w_alpha: 1.0
+kd_s_alpha: 1.0
+temperature: 1.0
+budget: 1.0
+pet_sources:
+- "config/lora/supervised/dtd/8-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck':
+  16}/lr-1e-3/config.yaml"
+- "config/lora/supervised/dtd/8-shot/clip/dpr-0/train-aug-strong/{'lora_bottleneck':
+  16}/lr-1e-3/config.yaml"
+- "config/adaptformer/supervised/dtd/8-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler':
+  0.1, 'adapter_bottleneck': 4}/lr-1e-3/config.yaml"
+- "config/adaptformer/supervised/dtd/8-shot/clip/dpr-0/train-aug-strong/{'adapter_scaler':
+  0.1, 'adapter_bottleneck': 16}/lr-1e-3/config.yaml"
+pl_selection: balanced-max
+logits_ensemble: voting
+bootstrapping: true
+peft_config:
+  method_name: adaptformer
+  ft_mlp_module: adapter
+  ft_mlp_mode: parallel
+  ft_mlp_ln: before
+  adapter_init: lora_kaiming
+  adapter_bottleneck: 16
+  adapter_scaler: 0.1
+vit_config:
+  drop_path_rate: 0.0
+pet_sources_rows:
+- - lora
+  - supervised
+  - dtd
+  - 8-shot
+  - dinov2
+  - "['dpr-0', 'train-aug-strong', \"{'lora_bottleneck': 16}\", 'lr-1e-3']"
+  - 465.9695129394531
+  - 0.65043557674829
+  - 0.494699949945825
+  - 0.76114354546933
+  - 0.5061235323720691
+  - 9.759539604187012
+  - 0.2161957323551178
+  - 0.6819148659706116
+  - '2026-01-28 02:35:57'
+- - lora
+  - supervised
+  - dtd
+  - 8-shot
+  - clip
+  - "['dpr-0', 'train-aug-strong', \"{'lora_bottleneck': 16}\", 'lr-1e-3']"
+  - 396.1075134277344
+  - 0.659561945578778
+  - 0.4860067070953985
+  - 0.7680391885847646
+  - 0.4975757840694617
+  - 13.159967422485352
+  - 0.21383725106716156
+  - 0.6569148898124695
+  - '2026-01-28 02:35:57'
+- - adaptformer
+  - supervised
+  - dtd
+  - 8-shot
+  - dinov2
+  - "['dpr-0.2', 'train-aug-strong', \"{'adapter_scaler': 0.1, 'adapter_bottleneck':
+    4}\", 'lr-1e-3']"
+  - 412.4023132324219
+  - 0.6459102072664817
+  - 0.4811031541452173
+  - 0.7572064878486998
+  - 0.49364208743294663
+  - 12.555572509765625
+  - 0.21423283219337463
+  - 0.6994680762290955
+  - '2026-01-28 02:35:57'
+- - adaptformer
+  - supervised
+  - dtd
+  - 8-shot
+  - clip
+  - "['dpr-0', 'train-aug-strong', \"{'adapter_scaler': 0.1, 'adapter_bottleneck':
+    16}\", 'lr-1e-3']"
+  - 404.5086669921875
+  - 0.6316267809636797
+  - 0.4814646068880891
+  - 0.748820642907291
+  - 0.4929944282076845
+  - 11.50027847290039
+  - 0.20536020398139954
+  - 0.6973404288291931
+  - '2026-01-28 02:35:57'
