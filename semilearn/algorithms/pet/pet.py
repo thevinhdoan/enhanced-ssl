@@ -7,6 +7,8 @@ from .pet_hook import PETHook
 
 import copy
 import faiss
+import json
+import os
 import numpy as np
 import torch
 import pprint
@@ -115,10 +117,14 @@ class PET(AlgorithmBase):
         self.lambda_2 = getattr(args, "lambda_2", 0.0)
         self.grouping_update_interval = getattr(args, "grouping_update_interval", 0)
         self.robust_enable = (self.lambda_1 > 0) or (self.lambda_2 > 0)
+        self.log_partition_stats = getattr(args, "log_partition_stats", False)
+        self.partition_log_dir = getattr(args, "partition_log_dir", "partition_stats")
+        self.partition_refresh_enabled = self.robust_enable or self.log_partition_stats
         self.robust_ulb2centroid = {}
         self.robust_centroid_logits = {}
         self.robust_lb_targets = {}
         self.robust_lb_idx_list = None
+        self.partition_version = 0
 
     def reset_model(self):
         assert self._model is not None, "Model is not initialized"
@@ -143,8 +149,92 @@ class PET(AlgorithmBase):
         self.register_hook(PETHook(), "PETHook")
         super().set_hooks()
 
-    def _refresh_robust_grouping(self):
-        if not self.robust_enable:
+    def _counter_to_serializable_dict(self, counter):
+        return {
+            str(int(class_id)): int(count)
+            for class_id, count in sorted(counter.items())
+            if count > 0
+        }
+
+    def _log_partition_stats(self, i_round, epoch, lb_indices, ulb_indices, ulb_targets):
+        if not self.log_partition_stats:
+            return
+
+        centroid_total_counts = {}
+        centroid_ulb_counts = {}
+        assigned_ulb_counts = {}
+
+        for centroid_idx in lb_indices.tolist():
+            centroid_idx = int(centroid_idx)
+            centroid_label = int(self.robust_lb_targets[centroid_idx])
+            centroid_total_counts[centroid_idx] = {centroid_label: 1}
+            centroid_ulb_counts[centroid_idx] = {}
+            assigned_ulb_counts[centroid_idx] = 0
+
+        ulb_idx_to_target = {
+            int(ulb_idx): int(target)
+            for ulb_idx, target in zip(ulb_indices.tolist(), ulb_targets.tolist())
+        }
+
+        for ulb_idx, centroid_idx in self.robust_ulb2centroid.items():
+            centroid_idx = int(centroid_idx)
+            ulb_label = ulb_idx_to_target[int(ulb_idx)]
+            centroid_total_counts[centroid_idx][ulb_label] = centroid_total_counts[centroid_idx].get(ulb_label, 0) + 1
+            centroid_ulb_counts[centroid_idx][ulb_label] = centroid_ulb_counts[centroid_idx].get(ulb_label, 0) + 1
+            assigned_ulb_counts[centroid_idx] += 1
+
+        clusters = []
+        cluster_sizes = []
+        for centroid_idx in lb_indices.tolist():
+            centroid_idx = int(centroid_idx)
+            size_including_centroid = int(sum(centroid_total_counts[centroid_idx].values()))
+            cluster_sizes.append(size_including_centroid)
+            clusters.append(
+                {
+                    "centroid_dataset_idx": centroid_idx,
+                    "centroid_label": int(self.robust_lb_targets[centroid_idx]),
+                    "num_assigned_unlabeled": int(assigned_ulb_counts[centroid_idx]),
+                    "size_including_centroid": size_including_centroid,
+                    "assigned_unlabeled_class_counts": self._counter_to_serializable_dict(centroid_ulb_counts[centroid_idx]),
+                    "class_counts_including_centroid": self._counter_to_serializable_dict(centroid_total_counts[centroid_idx]),
+                }
+            )
+
+        partition_stats = {
+            "partition_version": int(self.partition_version),
+            "round": int(i_round),
+            "epoch": int(epoch),
+            "grouping_update_interval": int(self.grouping_update_interval),
+            "num_clusters": int(len(lb_indices)),
+            "num_unlabeled_points": int(len(ulb_indices)),
+            "num_assigned_points": int(len(self.robust_ulb2centroid)),
+            "cluster_size_summary": {
+                "min": int(min(cluster_sizes)) if cluster_sizes else 0,
+                "max": int(max(cluster_sizes)) if cluster_sizes else 0,
+                "mean": float(np.mean(cluster_sizes)) if cluster_sizes else 0.0,
+            },
+            "clusters": clusters,
+        }
+
+        log_dir = os.path.join(self.save_dir, self.save_name, self.partition_log_dir)
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(
+            log_dir,
+            f"partition_v{self.partition_version:03d}_r{i_round:02d}_e{epoch:03d}.json",
+        )
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(partition_stats, f, indent=2)
+
+        self.print_fn(
+            f"Saved partition stats v{self.partition_version} to {log_path} "
+            f"(clusters={len(lb_indices)}, min_size={partition_stats['cluster_size_summary']['min']}, "
+            f"max_size={partition_stats['cluster_size_summary']['max']}, "
+            f"mean_size={partition_stats['cluster_size_summary']['mean']:.2f})"
+        )
+        self.partition_version += 1
+
+    def _refresh_robust_grouping(self, i_round, epoch):
+        if not self.partition_refresh_enabled:
             return
         lb_loader = self.loader_dict.get("train_lb_oracle")
         ulb_loader = self.loader_dict.get("train_ulb_oracle")
@@ -163,6 +253,7 @@ class PET(AlgorithmBase):
         lb_targets = lb_loader.dataset.targets
         self.robust_lb_targets = {int(idx): int(target) for idx, target in zip(lb_indices, lb_targets)}
         self.print_fn(f"Refreshed robust grouping: {len(self.robust_ulb2centroid)} unlabeled assignments, {len(self.robust_centroid_logits)} centroids.")
+        self._log_partition_stats(i_round, epoch, lb_indices, ulb_indices, np.asarray(ulb_loader.dataset.targets))
 
     def train_step(self, idx_ulb, x_ulb, x_ulb_w, x_ulb_s, pl_ulb, distill_scores_ulb, y_true_ulb):
         # import pdb; pdb.set_trace()
@@ -304,8 +395,8 @@ class PET(AlgorithmBase):
                 self.print_fn(f"Epoch {self.epoch}/{self.epochs}")
 
                 self.call_hook("before_train_epoch")
-                if self.robust_enable and (self.grouping_update_interval == 0 or epoch % self.grouping_update_interval == 0):
-                    self._refresh_robust_grouping()
+                if self.partition_refresh_enabled and (self.grouping_update_interval == 0 or epoch % self.grouping_update_interval == 0):
+                    self._refresh_robust_grouping(i_round, epoch)
                 ulb_iter = iter(self.loader_dict['train_ulb'])
 
                 pl = self.pl[i_round]['pl']

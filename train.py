@@ -277,6 +277,8 @@ def get_config():
     parser.add_argument("--lambda_1", type=float, default=0.0, help="Weight for alignment term in optional robust loss")
     parser.add_argument("--lambda_2", type=float, default=0.0, help="Weight for robustness term in optional robust loss")
     parser.add_argument("--grouping_update_interval", type=int, default=5, help="Recompute clustering every N epochs when robust loss is enabled")
+    parser.add_argument("--log_partition_stats", action="store_true", help="Save per-partition class distributions during PET grouping refreshes")
+    parser.add_argument("--partition_log_dir", type=str, default="partition_stats", help="Directory name under save_dir/save_name for partition statistic logs")
 
     # add algorithm specific parameters
     args = parser.parse_args()
