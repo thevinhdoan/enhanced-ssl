@@ -32,12 +32,20 @@ from infer_corrupted import (
 
 
 _ROOT_DIR = os.path.abspath(os.curdir)
-_SUPPORTED_ATTACKS = ("pgd", "square")
+_SUPPORTED_ATTACKS = ("pgd", "square", "hopskipjump")
 
 
 def _parse_attack_list(attack_list):
+    alias_map = {
+        "hsja": "hopskipjump",
+        "hopskipjumpattack": "hopskipjump",
+    }
     if attack_list:
-        attacks = [attack.strip().lower() for attack in attack_list.split(",") if attack.strip()]
+        attacks = [
+            alias_map.get(attack.strip().lower(), attack.strip().lower())
+            for attack in attack_list.split(",")
+            if attack.strip()
+        ]
     else:
         attacks = ["pgd"]
     invalid = [attack for attack in attacks if attack not in _SUPPORTED_ATTACKS]
@@ -127,7 +135,25 @@ def _float_key(value):
     return f"{float(value):.10g}"
 
 
-def _attack_key(dataset, net, checkpoint, attack, norm, eps, pgd_steps, pgd_step_size, square_queries, square_p_init, square_seed):
+def _attack_key(
+    dataset,
+    net,
+    checkpoint,
+    attack,
+    norm,
+    eps,
+    pgd_steps,
+    pgd_step_size,
+    square_queries,
+    square_p_init,
+    square_seed,
+    hsja_num_iterations,
+    hsja_gamma,
+    hsja_max_num_evals,
+    hsja_init_num_evals,
+    hsja_init_trials,
+    hsja_seed,
+):
     return (
         str(dataset or "").strip(),
         str(net or "").strip(),
@@ -140,6 +166,12 @@ def _attack_key(dataset, net, checkpoint, attack, norm, eps, pgd_steps, pgd_step
         str(square_queries or "").strip(),
         _float_key(square_p_init),
         str(square_seed or "").strip(),
+        str(hsja_num_iterations or "").strip(),
+        _float_key(hsja_gamma),
+        str(hsja_max_num_evals or "").strip(),
+        str(hsja_init_num_evals or "").strip(),
+        str(hsja_init_trials or "").strip(),
+        str(hsja_seed or "").strip(),
     )
 
 
@@ -158,6 +190,12 @@ def _attack_key_from_row(row):
         str(row.get("square_queries", "")).strip(),
         _float_key(row.get("square_p_init")),
         str(row.get("square_seed", "")).strip(),
+        str(row.get("hsja_num_iterations", "")).strip(),
+        _float_key(row.get("hsja_gamma")),
+        str(row.get("hsja_max_num_evals", "")).strip(),
+        str(row.get("hsja_init_num_evals", "")).strip(),
+        str(row.get("hsja_init_trials", "")).strip(),
+        str(row.get("hsja_seed", "")).strip(),
     )
 
 
@@ -359,6 +397,288 @@ def _run_square_attack(
     return _renorm_imagenet(x_adv) if was_norm else x_adv
 
 
+def _hsja_decision_function(model, images, original_label, was_norm, decision_batch_size):
+    if images.ndim == 3:
+        images = images.unsqueeze(0)
+    images = images.clamp(0.0, 1.0)
+
+    decisions = []
+    with torch.inference_mode():
+        for start in range(0, images.shape[0], decision_batch_size):
+            batch = images[start:start + decision_batch_size]
+            logits = _forward_model_on_pixel_inputs(model, batch, was_norm)
+            pred = logits.argmax(dim=1)
+            decisions.append(pred.ne(int(original_label)))
+    return torch.cat(decisions, dim=0)
+
+
+def _hsja_linf_distance(original, perturbed):
+    if perturbed.ndim == 3:
+        return (perturbed - original).abs().amax()
+    return (perturbed - original.unsqueeze(0)).abs().flatten(1).amax(dim=1).values
+
+
+def _hsja_project(original, perturbed_images, alphas):
+    if perturbed_images.ndim == 3:
+        perturbed_images = perturbed_images.unsqueeze(0)
+    alphas = alphas.view(-1, 1, 1, 1).to(device=perturbed_images.device, dtype=perturbed_images.dtype)
+    projected = torch.maximum(torch.minimum(perturbed_images, original.unsqueeze(0) + alphas), original.unsqueeze(0) - alphas)
+    return projected.clamp(0.0, 1.0)
+
+
+def _hsja_binary_search_batch(original, perturbed_images, model, original_label, theta, was_norm, decision_batch_size):
+    if perturbed_images.ndim == 3:
+        perturbed_images = perturbed_images.unsqueeze(0)
+
+    dists_post_update = _hsja_linf_distance(original, perturbed_images)
+    highs = dists_post_update.clone()
+    thresholds = torch.minimum(dists_post_update * theta, torch.full_like(dists_post_update, theta))
+    thresholds = torch.clamp(thresholds, min=1e-12)
+    lows = torch.zeros_like(highs)
+
+    while torch.max((highs - lows) / thresholds) > 1:
+        mids = (highs + lows) / 2.0
+        mid_images = _hsja_project(original, perturbed_images, mids)
+        decisions = _hsja_decision_function(
+            model,
+            mid_images,
+            original_label=original_label,
+            was_norm=was_norm,
+            decision_batch_size=decision_batch_size,
+        )
+        lows = torch.where(decisions, lows, mids)
+        highs = torch.where(decisions, mids, highs)
+
+    out_images = _hsja_project(original, perturbed_images, highs)
+    dists = _hsja_linf_distance(original, out_images)
+    idx = int(torch.argmin(dists).item())
+    return out_images[idx], float(dists_post_update[idx].item())
+
+
+def _hsja_initialize(model, sample, original_label, was_norm, generator, init_trials, decision_batch_size):
+    for _ in range(init_trials):
+        random_noise = torch.rand(sample.shape, generator=generator, device="cpu", dtype=sample.dtype)
+        random_noise = random_noise.to(device=sample.device, dtype=sample.dtype)
+        success = _hsja_decision_function(
+            model,
+            random_noise,
+            original_label=original_label,
+            was_norm=was_norm,
+            decision_batch_size=decision_batch_size,
+        )[0]
+        if not bool(success):
+            continue
+
+        low = 0.0
+        high = 1.0
+        while high - low > 1e-3:
+            mid = (high + low) / 2.0
+            blended = ((1.0 - mid) * sample + mid * random_noise).clamp(0.0, 1.0)
+            success = _hsja_decision_function(
+                model,
+                blended,
+                original_label=original_label,
+                was_norm=was_norm,
+                decision_batch_size=decision_batch_size,
+            )[0]
+            if bool(success):
+                high = mid
+            else:
+                low = mid
+        return ((1.0 - high) * sample + high * random_noise).clamp(0.0, 1.0)
+    return None
+
+
+def _hsja_select_delta(cur_iter, d, theta, dist_post_update):
+    if cur_iter == 1:
+        return 0.1
+    return d * theta * dist_post_update
+
+
+def _hsja_approximate_gradient(
+    model,
+    sample,
+    num_evals,
+    delta,
+    original_label,
+    was_norm,
+    generator,
+    decision_batch_size,
+):
+    grad_sum = torch.zeros_like(sample)
+    rv_sum = torch.zeros_like(sample)
+    fval_sum = 0.0
+    processed = 0
+
+    while processed < num_evals:
+        current = min(decision_batch_size, num_evals - processed)
+        rv = torch.rand((current,) + tuple(sample.shape), generator=generator, device="cpu", dtype=sample.dtype)
+        rv = rv.mul_(2.0).sub_(1.0)
+        rv = rv.to(device=sample.device, dtype=sample.dtype)
+        rv = rv / torch.clamp(rv.flatten(1).norm(dim=1, keepdim=True), min=1e-12).view(-1, 1, 1, 1)
+
+        perturbed = (sample.unsqueeze(0) + delta * rv).clamp(0.0, 1.0)
+        rv = (perturbed - sample.unsqueeze(0)) / delta
+        decisions = _hsja_decision_function(
+            model,
+            perturbed,
+            original_label=original_label,
+            was_norm=was_norm,
+            decision_batch_size=decision_batch_size,
+        )
+        fval = decisions.to(dtype=sample.dtype) * 2.0 - 1.0
+
+        fval_sum += float(fval.sum().item())
+        rv_sum += rv.sum(dim=0)
+        grad_sum += (fval.view(-1, 1, 1, 1) * rv).sum(dim=0)
+        processed += current
+
+    mean_fval = fval_sum / float(num_evals)
+    mean_rv = rv_sum / float(num_evals)
+    if mean_fval == 1.0:
+        grad = mean_rv
+    elif mean_fval == -1.0:
+        grad = -mean_rv
+    else:
+        grad = grad_sum / float(num_evals) - mean_fval * mean_rv
+
+    return grad / torch.clamp(grad.norm(), min=1e-12)
+
+
+def _hsja_geometric_progression_for_stepsize(
+    model,
+    x,
+    update,
+    dist,
+    current_iter,
+    original_label,
+    was_norm,
+    decision_batch_size,
+):
+    epsilon = max(dist / math.sqrt(float(current_iter)), 1e-12)
+    while epsilon > 1e-12:
+        new = (x + epsilon * update).clamp(0.0, 1.0)
+        success = _hsja_decision_function(
+            model,
+            new,
+            original_label=original_label,
+            was_norm=was_norm,
+            decision_batch_size=decision_batch_size,
+        )[0]
+        if bool(success):
+            break
+        epsilon /= 2.0
+    return epsilon
+
+
+def _run_hopskipjump_attack(
+    model,
+    x,
+    y,
+    eps,
+    num_iterations,
+    gamma,
+    max_num_evals,
+    init_num_evals,
+    init_trials,
+    seed,
+    decision_batch_size,
+    assume_imagenet_norm,
+):
+    if num_iterations <= 0:
+        raise ValueError("--hsja_num_iterations must be positive")
+    if max_num_evals <= 0:
+        raise ValueError("--hsja_max_num_evals must be positive")
+    if init_num_evals <= 0:
+        raise ValueError("--hsja_init_num_evals must be positive")
+    if init_trials <= 0:
+        raise ValueError("--hsja_init_trials must be positive")
+
+    x_pixel, was_norm = _prepare_attack_inputs(x, assume_imagenet_norm)
+    with torch.inference_mode():
+        logits_clean = _forward_model_on_pixel_inputs(model, x_pixel, was_norm)
+    clean_pred = logits_clean.argmax(dim=1)
+    correct_mask = clean_pred.eq(y)
+    if not bool(correct_mask.any()):
+        return _renorm_imagenet(x_pixel) if was_norm else x_pixel
+
+    x_adv = x_pixel.clone()
+    d = x_pixel[0].numel()
+    theta = gamma / float(d ** 2)
+
+    for sample_offset, sample_idx in enumerate(correct_mask.nonzero(as_tuple=True)[0].tolist()):
+        sample = x_pixel[sample_idx]
+        original_label = int(clean_pred[sample_idx].item())
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(int(seed) + sample_offset)
+
+        perturbed = _hsja_initialize(
+            model,
+            sample,
+            original_label=original_label,
+            was_norm=was_norm,
+            generator=generator,
+            init_trials=init_trials,
+            decision_batch_size=decision_batch_size,
+        )
+        if perturbed is None:
+            continue
+
+        perturbed, dist_post_update = _hsja_binary_search_batch(
+            sample,
+            perturbed,
+            model,
+            original_label=original_label,
+            theta=theta,
+            was_norm=was_norm,
+            decision_batch_size=decision_batch_size,
+        )
+        dist = float(_hsja_linf_distance(sample, perturbed).item())
+
+        for iteration in range(num_iterations):
+            current_iter = iteration + 1
+            delta = _hsja_select_delta(current_iter, d, theta, dist_post_update)
+            num_evals = min(int(init_num_evals * math.sqrt(float(current_iter))), int(max_num_evals))
+
+            grad = _hsja_approximate_gradient(
+                model,
+                perturbed,
+                num_evals=num_evals,
+                delta=delta,
+                original_label=original_label,
+                was_norm=was_norm,
+                generator=generator,
+                decision_batch_size=decision_batch_size,
+            )
+            update = grad.sign()
+            epsilon = _hsja_geometric_progression_for_stepsize(
+                model,
+                perturbed,
+                update=update,
+                dist=dist,
+                current_iter=current_iter,
+                original_label=original_label,
+                was_norm=was_norm,
+                decision_batch_size=decision_batch_size,
+            )
+            perturbed = (perturbed + epsilon * update).clamp(0.0, 1.0)
+            perturbed, dist_post_update = _hsja_binary_search_batch(
+                sample,
+                perturbed,
+                model,
+                original_label=original_label,
+                theta=theta,
+                was_norm=was_norm,
+                decision_batch_size=decision_batch_size,
+            )
+            dist = float(_hsja_linf_distance(sample, perturbed).item())
+
+        if dist <= eps:
+            x_adv[sample_idx] = perturbed
+
+    return _renorm_imagenet(x_adv) if was_norm else x_adv
+
+
 def run_inference_adversarial(
     model,
     loader,
@@ -372,6 +692,13 @@ def run_inference_adversarial(
     square_queries=1000,
     square_p_init=0.05,
     square_seed=0,
+    hsja_num_iterations=20,
+    hsja_gamma=1.0,
+    hsja_max_num_evals=200,
+    hsja_init_num_evals=50,
+    hsja_init_trials=100,
+    hsja_seed=0,
+    hsja_decision_batch_size=64,
     assume_imagenet_norm=True,
 ):
     model.eval()
@@ -419,6 +746,21 @@ def run_inference_adversarial(
                 n_queries=square_queries,
                 p_init=square_p_init,
                 seed=square_seed + batch_idx,
+                assume_imagenet_norm=assume_imagenet_norm,
+            )
+        elif attack == "hopskipjump":
+            x_adv = _run_hopskipjump_attack(
+                model,
+                x,
+                y,
+                eps=eps,
+                num_iterations=hsja_num_iterations,
+                gamma=hsja_gamma,
+                max_num_evals=hsja_max_num_evals,
+                init_num_evals=hsja_init_num_evals,
+                init_trials=hsja_init_trials,
+                seed=hsja_seed + batch_idx * 1000,
+                decision_batch_size=hsja_decision_batch_size,
                 assume_imagenet_norm=assume_imagenet_norm,
             )
         else:
@@ -469,8 +811,8 @@ def main():
 
     parser.add_argument("--eval_attacks", action="store_true", help="Evaluate adversarial attacks and log to CSV.")
     parser.add_argument("--attack_out", default="attack_results.csv", help="CSV output path for adversarial results.")
-    parser.add_argument("--attack_list", default="pgd", help="Comma-separated attacks to run (pgd,square).")
-    parser.add_argument("--attack_norm", default="Linf", help="Attack norm. PGD and Square Attack currently support Linf.")
+    parser.add_argument("--attack_list", default="pgd", help="Comma-separated attacks to run (pgd,square,hopskipjump).")
+    parser.add_argument("--attack_norm", default="Linf", help="Attack norm. PGD, Square Attack, and HSJA currently support Linf.")
     parser.add_argument("--eps_list", default=None, help="Comma-separated eps values in [0,1]. Default: 8/255.")
     parser.add_argument("--pgd_steps", type=int, default=20, help="Number of PGD steps.")
     parser.add_argument("--pgd_step_size", type=float, default=None, help="PGD step size. Default derives from eps.")
@@ -478,6 +820,13 @@ def main():
     parser.add_argument("--square_queries", type=int, default=1000, help="Square Attack query budget per example.")
     parser.add_argument("--square_p_init", type=float, default=0.05, help="Initial square size fraction for Square Attack.")
     parser.add_argument("--square_seed", type=int, default=0, help="Random seed for Square Attack.")
+    parser.add_argument("--hsja_num_iterations", type=int, default=20, help="Number of HopSkipJumpAttack iterations.")
+    parser.add_argument("--hsja_gamma", type=float, default=1.0, help="HSJA gamma used to set the binary-search threshold.")
+    parser.add_argument("--hsja_max_num_evals", type=int, default=200, help="Maximum number of HSJA decision evaluations per iteration for gradient estimation.")
+    parser.add_argument("--hsja_init_num_evals", type=int, default=50, help="Initial number of HSJA decision evaluations for gradient estimation.")
+    parser.add_argument("--hsja_init_trials", type=int, default=100, help="Maximum number of random initialization trials for HSJA.")
+    parser.add_argument("--hsja_seed", type=int, default=0, help="Random seed for HSJA.")
+    parser.add_argument("--hsja_decision_batch_size", type=int, default=64, help="Batch size used internally for HSJA decision queries.")
     parser.add_argument(
         "--assume_imagenet_norm",
         type=_str2bool,
@@ -564,6 +913,12 @@ def main():
         "square_queries",
         "square_p_init",
         "square_seed",
+        "hsja_num_iterations",
+        "hsja_gamma",
+        "hsja_max_num_evals",
+        "hsja_init_num_evals",
+        "hsja_init_trials",
+        "hsja_seed",
         "num_samples",
         "acc",
     ]
@@ -590,6 +945,12 @@ def main():
                     args.square_queries if attack == "square" else "",
                     args.square_p_init if attack == "square" else "",
                     args.square_seed if attack == "square" else "",
+                    args.hsja_num_iterations if attack == "hopskipjump" else "",
+                    args.hsja_gamma if attack == "hopskipjump" else "",
+                    args.hsja_max_num_evals if attack == "hopskipjump" else "",
+                    args.hsja_init_num_evals if attack == "hopskipjump" else "",
+                    args.hsja_init_trials if attack == "hopskipjump" else "",
+                    args.hsja_seed if attack == "hopskipjump" else "",
                 )
                 if key in existing_keys:
                     skipped += 1
@@ -609,6 +970,13 @@ def main():
                     square_queries=args.square_queries,
                     square_p_init=args.square_p_init,
                     square_seed=args.square_seed,
+                    hsja_num_iterations=args.hsja_num_iterations,
+                    hsja_gamma=args.hsja_gamma,
+                    hsja_max_num_evals=args.hsja_max_num_evals,
+                    hsja_init_num_evals=args.hsja_init_num_evals,
+                    hsja_init_trials=args.hsja_init_trials,
+                    hsja_seed=args.hsja_seed,
+                    hsja_decision_batch_size=args.hsja_decision_batch_size,
                     assume_imagenet_norm=args.assume_imagenet_norm,
                 )
                 row = {
@@ -623,6 +991,12 @@ def main():
                     "square_queries": (args.square_queries if attack == "square" else ""),
                     "square_p_init": (args.square_p_init if attack == "square" else ""),
                     "square_seed": (args.square_seed if attack == "square" else ""),
+                    "hsja_num_iterations": (args.hsja_num_iterations if attack == "hopskipjump" else ""),
+                    "hsja_gamma": (args.hsja_gamma if attack == "hopskipjump" else ""),
+                    "hsja_max_num_evals": (args.hsja_max_num_evals if attack == "hopskipjump" else ""),
+                    "hsja_init_num_evals": (args.hsja_init_num_evals if attack == "hopskipjump" else ""),
+                    "hsja_init_trials": (args.hsja_init_trials if attack == "hopskipjump" else ""),
+                    "hsja_seed": (args.hsja_seed if attack == "hopskipjump" else ""),
                     "num_samples": result["num_samples"],
                     "acc": (None if result["acc"] is None else float(result["acc"])),
                 }
