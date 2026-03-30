@@ -21,3 +21,4 @@ pytorch-metric-learning==2.9.0
 pytorch-adapt
 faiss-cpu==1.13.2
 imagecorruptions==1.1.2
+adversarial-robustness-toolbox==1.20.1
