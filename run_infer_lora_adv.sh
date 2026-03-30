@@ -13,7 +13,7 @@ python3 infer_adversarial.py \
     --eps_list 0.03137254901960784 \
     --attack_out lora_pet_pgd.csv
 python3 infer_adversarial.py \
-    --checkpoint "/mnt/extra_storage/users/vinhdt/thesis/archive/.saved_models_7/(v2)/lora/pet-ensembled/dtd/3-shot/dinov2/log/lora_pet.pth" \
+    --checkpoint "/mnt/extra_storage/users/vinhdt/thesis/archive/.saved_models_6/(v7)/lora/pet-ensembled/dtd/3-shot/dinov2/log/lora_pet.pth" \
     --dataset dtd \
     --num_classes 47 \
     --num_labels 141 \
@@ -26,7 +26,7 @@ python3 infer_adversarial.py \
     --square_p_init 0.05 \
     --attack_out lora_pet_square.csv
 python3 infer_adversarial.py \
-    --checkpoint "/mnt/extra_storage/users/vinhdt/thesis/archive/.saved_models_7/(v2)/lora/pet-ensembled/dtd/3-shot/dinov2/log/lora_pet.pth" \
+    --checkpoint "/mnt/extra_storage/users/vinhdt/thesis/archive/.saved_models_6/(v7)/lora/pet-ensembled/dtd/3-shot/dinov2/log/lora_pet.pth" \
     --dataset dtd \
     --num_classes 47 \
     --num_labels 141 \
@@ -52,7 +52,7 @@ python3 infer_adversarial.py \
     --eps_list 0.03137254901960784 \
     --attack_out lora_v-pet_pgd.csv
 python3 infer_adversarial.py \
-    --checkpoint "/mnt/extra_storage/users/vinhdt/thesis/archive/.saved_models_7/(v2)/lora/pet-ensembled-across-nets/dtd/3-shot/dinov2/log/lora_v-pet.pth" \
+    --checkpoint "/mnt/extra_storage/users/vinhdt/thesis/archive/.saved_models_6/(v7)/lora/pet-ensembled-across-nets/dtd/3-shot/dinov2/log/lora_v-pet.pth" \
     --dataset dtd \
     --num_classes 47 \
     --num_labels 141 \
@@ -65,7 +65,7 @@ python3 infer_adversarial.py \
     --square_p_init 0.05 \
     --attack_out lora_v-pet_square.csv
 python3 infer_adversarial.py \
-    --checkpoint "/mnt/extra_storage/users/vinhdt/thesis/archive/.saved_models_7/(v2)/lora/pet-ensembled-across-nets/dtd/3-shot/dinov2/log/lora_v-pet.pth" \
+    --checkpoint "/mnt/extra_storage/users/vinhdt/thesis/archive/.saved_models_6/(v7)/lora/pet-ensembled-across-nets/dtd/3-shot/dinov2/log/lora_v-pet.pth" \
     --dataset dtd \
     --num_classes 47 \
     --num_labels 141 \

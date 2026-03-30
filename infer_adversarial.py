@@ -4,6 +4,7 @@ import math
 import os
 import pickle
 import zipfile
+from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
@@ -415,7 +416,7 @@ def _hsja_decision_function(model, images, original_label, was_norm, decision_ba
 def _hsja_linf_distance(original, perturbed):
     if perturbed.ndim == 3:
         return (perturbed - original).abs().amax()
-    return (perturbed - original.unsqueeze(0)).abs().flatten(1).amax(dim=1).values
+    return (perturbed - original.unsqueeze(0)).abs().flatten(1).amax(dim=1)
 
 
 def _hsja_project(original, perturbed_images, alphas):
@@ -606,7 +607,7 @@ def _run_hopskipjump_attack(
     d = x_pixel[0].numel()
     theta = gamma / float(d ** 2)
 
-    for sample_offset, sample_idx in enumerate(correct_mask.nonzero(as_tuple=True)[0].tolist()):
+    for sample_offset, sample_idx in tqdm(enumerate(correct_mask.nonzero(as_tuple=True)[0].tolist()), total=correct_mask.sum().item(), desc="HSJA Attack"):
         sample = x_pixel[sample_idx]
         original_label = int(clean_pred[sample_idx].item())
         generator = torch.Generator(device="cpu")
@@ -635,7 +636,7 @@ def _run_hopskipjump_attack(
         )
         dist = float(_hsja_linf_distance(sample, perturbed).item())
 
-        for iteration in range(num_iterations):
+        for iteration in tqdm(range(num_iterations), total=num_iterations, desc=f"Sample {sample_idx} HSJA Iteration"):
             current_iter = iteration + 1
             delta = _hsja_select_delta(current_iter, d, theta, dist_post_update)
             num_evals = min(int(init_num_evals * math.sqrt(float(current_iter))), int(max_num_evals))
