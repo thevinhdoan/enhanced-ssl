@@ -25,6 +25,17 @@ _ROOT_DIR = os.path.abspath(os.curdir)
 _yaml = YAML()
 
 
+def _normalize_sample_relpath(sample_path):
+    sample_path = os.path.normpath(str(sample_path)).replace("\\", "/")
+    marker = "/images/"
+    if marker in sample_path:
+        return sample_path.split(marker, 1)[1]
+    marker = "images/"
+    if marker in sample_path:
+        return sample_path.split(marker, 1)[1]
+    return sample_path
+
+
 def _eval(model, loader, eval_unsup=False):
     model.eval()
     acc = 0.0
@@ -35,6 +46,8 @@ def _eval(model, loader, eval_unsup=False):
     y_pred = []
     y_probs = []
     y_labels = []
+    dataset_indices = []
+    sample_relpaths = []
     
     _n_data_processed = 0
     dset = loader.dataset
@@ -47,6 +60,7 @@ def _eval(model, loader, eval_unsup=False):
         for data in tqdm(loader):
             image = data['x']
             target = data['y']
+            batch_indices = data.get('idx')
 
             _n_data_processed += len(image)
 
@@ -64,6 +78,13 @@ def _eval(model, loader, eval_unsup=False):
             y_pred.append(pred.cpu())
             y_probs.append(prob.cpu())
             y_labels.append(target.cpu())
+            if batch_indices is not None:
+                batch_indices = batch_indices.cpu().tolist()
+                dataset_indices.extend(batch_indices)
+                sample_relpaths.extend([
+                    _normalize_sample_relpath(dset.samples[idx])
+                    for idx in batch_indices
+                ])
 
             n_processed += len(image)
     
@@ -81,7 +102,7 @@ def _eval(model, loader, eval_unsup=False):
         eval_dict['acc'] = acc
     else:
         eval_dict = {'acc': acc}
-    return eval_dict, y_feats, y_logits, y_pred, y_probs, y_labels
+    return eval_dict, y_feats, y_logits, y_pred, y_probs, y_labels, sample_relpaths, dataset_indices
 
 
 def _get_vtab(
@@ -269,7 +290,11 @@ if __name__ == '__main__':
         # Extract PL
         if '/supervised' in load_path:
             print(f'Extracting PL for {load_path}')
-            eval_dict, y_feats, y_logits, y_pred, y_probs, y_true = _eval(model, train_ulb_loader, eval_unsup=False)
+            eval_dict, y_feats, y_logits, y_pred, y_probs, y_true, sample_relpaths, dataset_indices = _eval(
+                model,
+                train_ulb_loader,
+                eval_unsup=False,
+            )
 
             y_true = y_true.numpy()
             y_pred = y_pred.numpy()
@@ -289,6 +314,8 @@ if __name__ == '__main__':
                                 'y_pred': y_pred, 
                                 'y_logits': y_logits, 
                                 'y_feats': y_feats,
+                                'sample_relpaths': sample_relpaths,
+                                'dataset_indices': np.array(dataset_indices, dtype=np.int64),
                                 'ulb_lb_mask': ulb_lb_mask,
                                 'eval_dict': eval_dict}, f)
 
@@ -301,7 +328,11 @@ if __name__ == '__main__':
                         weak_pl_filenames.remove(f)
             print(f'Extracting weak PL for {weak_pl_filenames}')
             for _weak_pl_filename in weak_pl_filenames:
-                eval_dict, y_feats, y_logits, y_pred, y_probs, y_true = _eval(model, train_ulb_weakaug_loader, eval_unsup=False)
+                eval_dict, y_feats, y_logits, y_pred, y_probs, y_true, sample_relpaths, dataset_indices = _eval(
+                    model,
+                    train_ulb_weakaug_loader,
+                    eval_unsup=False,
+                )
 
                 y_true = y_true.numpy()
                 y_pred = y_pred.numpy()
@@ -318,13 +349,19 @@ if __name__ == '__main__':
                                     'y_pred': y_pred,
                                     'y_logits': y_logits,
                                     'y_feats': y_feats,
+                                    'sample_relpaths': sample_relpaths,
+                                    'dataset_indices': np.array(dataset_indices, dtype=np.int64),
                                     'eval_dict': eval_dict}, f)
 
         # Get unsupervised metrics on validation set
         val_loader = DataLoader(val, batch_size=32, shuffle=False, num_workers=0)
         print(f'len(val): {len(val)}, len(val_loader): {len(val_loader)}')
 
-        val_eval_dict, val_y_feats, val_y_logits, val_y_pred, val_y_probs, val_y_true = _eval(model, val_loader, eval_unsup=True)
+        val_eval_dict, val_y_feats, val_y_logits, val_y_pred, val_y_probs, val_y_true, val_sample_relpaths, val_dataset_indices = _eval(
+            model,
+            val_loader,
+            eval_unsup=True,
+        )
 
         val_y_true = val_y_true.numpy()
         val_y_pred = val_y_pred.numpy()
@@ -342,5 +379,7 @@ if __name__ == '__main__':
                             'y_pred': val_y_pred, 
                             'y_logits': val_y_logits, 
                             'y_feats': val_y_feats,
+                            'sample_relpaths': val_sample_relpaths,
+                            'dataset_indices': np.array(val_dataset_indices, dtype=np.int64),
                             'eval_dict': val_eval_dict}, f)
         print(f'PL extraction done for {load_path}')

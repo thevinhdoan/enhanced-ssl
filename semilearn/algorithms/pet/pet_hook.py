@@ -17,6 +17,155 @@ _ROOT_DIR = os.path.abspath(os.curdir)
 _yaml = YAML()
 
 
+def _normalize_sample_identifier(sample_path):
+    sample_path = os.path.normpath(str(sample_path)).replace("\\", "/")
+    marker = "/images/"
+    if marker in sample_path:
+        return sample_path.split(marker, 1)[1]
+    marker = "images/"
+    if marker in sample_path:
+        return sample_path.split(marker, 1)[1]
+    return sample_path
+
+
+def _config_uses_filtered_classes(config):
+    return config.get("selected_classes") is not None or bool(config.get("remap_selected_classes", False))
+
+
+def _candidate_source_log_paths(source, config):
+    candidates = []
+
+    save_dir = config.get('save_dir')
+    save_name = config.get('save_name', 'log')
+    if save_dir:
+        if os.path.isabs(save_dir):
+            candidates.append(os.path.join(save_dir, save_name))
+        else:
+            candidates.append(os.path.join(_ROOT_DIR, save_dir, save_name))
+
+    extra_roots = []
+    env_root = os.environ.get("PET_SOURCE_SAVE_ROOT")
+    if env_root:
+        extra_roots.extend([root for root in env_root.split(os.pathsep) if root])
+    if not _config_uses_filtered_classes(config):
+        extra_roots.extend([
+            "/mnt/extra_storage/users/vinhdt/thesis/dtd01_3/saved_models",
+            "/mnt/extra_storage/users/vinhdt/thesis/dtd_3/saved_models",
+        ])
+
+    source_rel = source
+    if source_rel.startswith("config/"):
+        source_rel = source_rel[len("config/"):]
+    if source_rel.endswith("/config.yaml"):
+        source_rel = source_rel[:-len("/config.yaml")]
+    for root in extra_roots:
+        candidates.append(os.path.join(root, source_rel, "log"))
+
+    deduped = []
+    seen = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        deduped.append(path)
+    return deduped
+
+
+def _resolve_source_artifact(source, config, artifact_name):
+    attempted = []
+    for log_path in _candidate_source_log_paths(source, config):
+        artifact_path = os.path.join(log_path, artifact_name)
+        attempted.append(artifact_path)
+        if os.path.exists(artifact_path):
+            return artifact_path
+    attempted_str = "\n".join(attempted)
+    if _config_uses_filtered_classes(config):
+        raise AssertionError(
+            f'Artifact {artifact_name} for {source} does not exist in the expected two-class teacher outputs. '
+            f'Rerun run_two_class_supervised_flow.py / eval.py for that filtered teacher config.\nTried:\n{attempted_str}'
+        )
+    raise AssertionError(
+        f'Artifact {artifact_name} for {source} does not exist. Tried:\n{attempted_str}'
+    )
+
+
+def _predict_sample_identifiers(predict):
+    sample_ids = predict.get('sample_relpaths')
+    if sample_ids is None:
+        sample_ids = predict.get('sample_paths')
+    if sample_ids is None:
+        return None
+    return [_normalize_sample_identifier(sample_id) for sample_id in sample_ids]
+
+
+def _dataset_sample_identifiers(dataset):
+    return [_normalize_sample_identifier(sample_path) for sample_path in dataset.samples]
+
+
+def _reindex_predict_values(value, ordered_indices):
+    if isinstance(value, np.ndarray):
+        return value[ordered_indices]
+    if torch.is_tensor(value):
+        return value[ordered_indices]
+    if isinstance(value, list):
+        return [value[int(idx)] for idx in ordered_indices]
+    return value
+
+
+def _realign_predict_to_dataset(predict, dataset, source, artifact_name):
+    dataset_ids = _dataset_sample_identifiers(dataset)
+    predict_ids = _predict_sample_identifiers(predict)
+
+    if predict_ids is None:
+        if len(predict['y_logits']) != len(dataset_ids):
+            raise AssertionError(
+                f'Artifact {artifact_name} for {source} has {len(predict["y_logits"])} samples, '
+                f'but current PET train_ulb has {len(dataset_ids)} samples and the artifact does not contain sample_relpaths. '
+                'Rerun eval.py for the two-class teacher configs so pl.pkl includes sample_relpaths.'
+            )
+        return predict
+
+    id_to_idx = {}
+    for idx, sample_id in enumerate(predict_ids):
+        if sample_id in id_to_idx:
+            raise AssertionError(f'Duplicate sample identifier {sample_id} found in {artifact_name} for {source}.')
+        id_to_idx[sample_id] = idx
+
+    missing = [sample_id for sample_id in dataset_ids if sample_id not in id_to_idx]
+    if missing:
+        preview = ", ".join(missing[:5])
+        raise AssertionError(
+            f'Artifact {artifact_name} for {source} is missing {len(missing)} samples needed by current PET train_ulb. '
+            f'Examples: {preview}'
+        )
+
+    ordered_indices = np.array([id_to_idx[sample_id] for sample_id in dataset_ids], dtype=np.int64)
+    aligned = copy.deepcopy(predict)
+    for key in (
+        'y_true',
+        'y_pred',
+        'y_logits',
+        'y_feats',
+        'sample_relpaths',
+        'sample_paths',
+        'dataset_indices',
+    ):
+        if key in aligned:
+            aligned[key] = _reindex_predict_values(aligned[key], ordered_indices)
+    return aligned
+
+
+def _validate_predict_num_classes(predict, expected_num_classes, source, artifact_name):
+    if 'y_logits' not in predict:
+        raise AssertionError(f'Artifact {artifact_name} for {source} is missing y_logits.')
+    if predict['y_logits'].shape[1] != expected_num_classes:
+        raise AssertionError(
+            f'Artifact {artifact_name} for {source} has logits dim {predict["y_logits"].shape[1]}, '
+            f'but the current PET run expects {expected_num_classes} classes. '
+            'This usually means stale pseudo-label files from a different class setup.'
+        )
+
+
 def _score_to_pl(score):
     # Randomized tie-breaking argmax
     return np.random.choice(np.where(score == score.max())[0])
@@ -117,6 +266,8 @@ class PETHook(Hook):
         logits_ensemble = args.logits_ensemble
         pl_selection = args.pl_selection
         predicts = {}
+        train_ulb_dataset = algorithm.loader_dict['train_ulb'].dataset
+        expected_num_classes = int(args.num_classes)
         
         algorithm.print_fn(f'PET sources: {pet_sources}')
         for source in pet_sources:
@@ -129,21 +280,20 @@ class PETHook(Hook):
             save_name = config['save_name']
 
             log_path = os.path.join(_ROOT_DIR, save_dir, save_name)
-            # pl_path = os.path.join(log_path, 'pl.pkl')
-            pl_path = os.path.join(..., source.lstrip("config/").rstrip("/config.yaml"), "log", "pl.pkl")
-
-            assert os.path.exists(pl_path), f'Pseudo labels for {source} does not exist. '
+            pl_path = _resolve_source_artifact(source, config, 'pl.pkl')
 
             # Load pseudo labels
             algorithm.print_fn(f'Loading pseudo labels for {source}')
+            algorithm.print_fn(f'Using pseudo labels from {pl_path}')
 
             with open(pl_path, 'rb') as f:
                 predict = pickle.load(f)
+            predict = _realign_predict_to_dataset(predict, train_ulb_dataset, source, 'pl.pkl')
+            _validate_predict_num_classes(predict, expected_num_classes, source, 'pl.pkl')
 
             predicts[source] = predict
             if args.bootstrapping:
-                # bootstrapping_pl_path = os.path.join(log_path, 'bootstrapping_pl')
-                bootstrapping_pl_path = os.path.join(..., source.lstrip("config/").rstrip("/config.yaml"), "log", "bootstrapping_pl")
+                bootstrapping_pl_path = _resolve_source_artifact(source, config, 'bootstrapping_pl')
                 y_logits = np.zeros(predict['y_logits'].shape)
                 n = 0
                 for file in os.listdir(bootstrapping_pl_path):
@@ -153,12 +303,15 @@ class PETHook(Hook):
                     pl_path = os.path.join(bootstrapping_pl_path, file)
                     with open(pl_path, 'rb') as f:
                         predict = pickle.load(f)
+                    predict = _realign_predict_to_dataset(predict, train_ulb_dataset, source, file)
+                    _validate_predict_num_classes(predict, expected_num_classes, source, file)
                     # predicts[_source] = predict
                     y_logits += predict['y_logits']
                     n += 1
                 assert n == 10, 'Bootstrapping error!'
                 y_logits /= n
-                predict['y_logits'] = y_logits
+                predicts[source] = copy.deepcopy(predicts[source])
+                predicts[source]['y_logits'] = y_logits
             
         assert not (algorithm.conf_threshold > 0 and len(predicts) > 1), 'Confidence threshold only works for single source. '
 
