@@ -182,6 +182,19 @@ def get_config():
     ## cv dataset arguments
     parser.add_argument("--img_size", type=int, default=32)
     parser.add_argument("--crop_ratio", type=float, default=0.875)
+    parser.add_argument(
+        "--selected_classes",
+        type=int,
+        nargs="*",
+        default=None,
+        help="Optional VTAB class labels to keep. When unset, all classes are used.",
+    )
+    parser.add_argument(
+        "--remap_selected_classes",
+        type=str2bool,
+        default=False,
+        help="If True, remap selected VTAB class labels to the contiguous range [0, K).",
+    )
 
     ## nlp dataset arguments
     parser.add_argument("--max_length", type=int, default=512)

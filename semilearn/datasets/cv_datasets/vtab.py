@@ -32,7 +32,9 @@ class VTAB(ImageFolder, BasicDataset):
                 is_ulb=False,
                 transform=None, 
                 medium_transform=None, 
-                strong_transform=None):
+                strong_transform=None,
+                selected_classes=None,
+                remap_selected_classes=False):
         """see comments at the beginning of the script"""
         img_root = os.path.join(root, 'images')
         # get absolute path
@@ -52,6 +54,8 @@ class VTAB(ImageFolder, BasicDataset):
         self._targets = None
         self._idx_list = None
         self.num_classes = None
+        self.selected_classes = selected_classes
+        self.remap_selected_classes = remap_selected_classes
         self.init_samples(idx_list)
 
 
@@ -89,6 +93,15 @@ class VTAB(ImageFolder, BasicDataset):
         samples = np.array(samples)
         targets = np.array(targets)
 
+        if self.selected_classes is not None:
+            selected_classes = np.array(self.selected_classes, dtype=np.int64)
+            keep_mask = np.isin(targets, selected_classes)
+            samples = samples[keep_mask]
+            targets = targets[keep_mask]
+            if self.remap_selected_classes:
+                class_to_new = {int(label): idx for idx, label in enumerate(self.selected_classes)}
+                targets = np.array([class_to_new[int(label)] for label in targets], dtype=np.int64)
+
         # Set attributes
         self.num_classes = len(set(targets))
         if idx_list is not None:
@@ -118,6 +131,43 @@ class VTAB(ImageFolder, BasicDataset):
 
 transform_mean = [0.485, 0.456, 0.406]
 transform_std = [0.229, 0.224, 0.225]
+
+
+def _parse_selected_classes(args):
+    selected_classes = getattr(args, 'selected_classes', None)
+    if selected_classes is None:
+        return None
+
+    if isinstance(selected_classes, np.ndarray):
+        selected_classes = selected_classes.tolist()
+    elif isinstance(selected_classes, str):
+        selected_classes = selected_classes.strip()
+        if selected_classes == '':
+            return None
+        selected_classes = [
+            int(token.strip())
+            for token in selected_classes.split(',')
+            if token.strip()
+        ]
+    elif isinstance(selected_classes, (list, tuple)):
+        selected_classes = [int(label) for label in selected_classes]
+    else:
+        selected_classes = [int(selected_classes)]
+
+    if len(selected_classes) == 0:
+        return None
+    if len(set(selected_classes)) != len(selected_classes):
+        raise ValueError(f"selected_classes contains duplicates: {selected_classes}")
+    return selected_classes
+
+
+def _class_filter_appendix(selected_classes, remap_selected_classes):
+    if selected_classes is None:
+        return ''
+    tag = '_'.join([f'c{int(label)}' for label in selected_classes])
+    if remap_selected_classes:
+        tag = f'{tag}_remap'
+    return tag
 
 
 def _get_vtab_transforms(img_size, model_name):
@@ -173,16 +223,33 @@ def get_vtab(args, alg, dset_name, num_labels, num_classes, data_dir='./data', i
     print(f"crop_ratio: {crop_ratio} is not used in VTAB dataset. ")
     img_size = args.img_size
     assert img_size == 224, f"Image size {img_size} is not equal to 224. "
+    selected_classes = _parse_selected_classes(args)
+    remap_selected_classes = bool(getattr(args, 'remap_selected_classes', False))
+    if selected_classes is not None:
+        print(f"Filtering VTAB to classes {selected_classes}, remap_selected_classes={remap_selected_classes}")
+    if selected_classes is not None and remap_selected_classes and num_classes != len(selected_classes):
+        raise ValueError(
+            f"num_classes={num_classes} must match len(selected_classes)={len(selected_classes)} "
+            "when remap_selected_classes=True."
+        )
+    class_filter_tag = _class_filter_appendix(selected_classes, remap_selected_classes)
 
     # Get transforms
     weak_transform, medium_transform, strong_transform, val_transform = _get_vtab_transforms(img_size, model_name)
 
     # Load dataset
     data_dir = os.path.join(data_dir, 'vtab', dset_name.lower())
+    ulb_lb_mask = None
 
     if train_split is not None:
         # Get samples and targets
-        _base_dataset = VTAB(alg, data_dir, split=train_split)
+        _base_dataset = VTAB(
+            alg,
+            data_dir,
+            split=train_split,
+            selected_classes=selected_classes,
+            remap_selected_classes=remap_selected_classes,
+        )
         train_samples = _base_dataset.samples
         train_targets = _base_dataset.targets
         train_idx = _base_dataset.idx_list
@@ -194,6 +261,9 @@ def get_vtab(args, alg, dset_name, num_labels, num_classes, data_dir='./data', i
             train_labeled_idxs = train_idx
             train_unlabeled_idxs = []
         else:
+            save_appendix = f"{train_split}_"
+            if class_filter_tag:
+                save_appendix = f"{train_split}_{class_filter_tag}_"
             train_labeled_idxs, _, _, train_unlabeled_idxs, _, _, ulb_lb_mask, = \
                 split_ssl_data(args, 
                             data=train_samples, 
@@ -205,7 +275,7 @@ def get_vtab(args, alg, dset_name, num_labels, num_classes, data_dir='./data', i
                             data_dir=data_dir, 
                             save_format='list',
                             return_idxs=True,
-                            save_appendix=f"{train_split}_")
+                            save_appendix=save_appendix)
         print(f"Num of labeled: {len(train_labeled_idxs)}, Num of unlabeled: {len(train_unlabeled_idxs)}")
 
         print(f"train_labeled_idxs: {train_labeled_idxs}")
@@ -231,7 +301,9 @@ def get_vtab(args, alg, dset_name, num_labels, num_classes, data_dir='./data', i
                                     is_ulb=False,
                                     idx_list=train_labeled_idxs,
                                     transform=train_transform,
-                                    strong_transform=strong_transform)
+                                    strong_transform=strong_transform,
+                                    selected_classes=selected_classes,
+                                    remap_selected_classes=remap_selected_classes)
 
         train_unlabeled_dataset = VTAB(alg, 
                                     data_dir, 
@@ -240,7 +312,9 @@ def get_vtab(args, alg, dset_name, num_labels, num_classes, data_dir='./data', i
                                     idx_list=train_unlabeled_idxs, 
                                     transform=train_transform, 
                                     medium_transform=medium_transform,
-                                    strong_transform=strong_transform)
+                                    strong_transform=strong_transform,
+                                    selected_classes=selected_classes,
+                                    remap_selected_classes=remap_selected_classes)
         
 
         train_labeled_dataset.val_transform = val_transform
@@ -253,11 +327,15 @@ def get_vtab(args, alg, dset_name, num_labels, num_classes, data_dir='./data', i
     val_dataset = VTAB(alg, 
                       data_dir, 
                       split='val', 
-                      transform=val_transform)
+                      transform=val_transform,
+                      selected_classes=selected_classes,
+                      remap_selected_classes=remap_selected_classes)
     test_dataset = VTAB(alg,
                         data_dir,
                         split='test',
-                        transform=val_transform)
+                        transform=val_transform,
+                        selected_classes=selected_classes,
+                        remap_selected_classes=remap_selected_classes)
 
     print(f"Num of labeled: {'None' if train_labeled_dataset is None else len(train_labeled_dataset)}, "
           f"Num of unlabeled: {'None' if train_unlabeled_dataset is None else len(train_unlabeled_dataset)}, "

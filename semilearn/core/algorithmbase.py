@@ -7,7 +7,7 @@ import contextlib
 import numpy as np
 from inspect import signature
 from collections import OrderedDict
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, top_k_accuracy_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
 import pprint
 import time
@@ -19,6 +19,26 @@ from semilearn.core.hooks import Hook, get_priority, CheckpointHook, TimerHook, 
 from semilearn.core.utils import get_dataset, get_data_loader, get_optimizer, get_cosine_schedule_with_warmup, Bn_Controller, EMA
 from semilearn.core.criterions import CELoss, ConsistencyLoss
 from semilearn.core.utils.metrics import unsupervised_scores
+
+
+def _safe_top_k_accuracy(y_true, y_score, k):
+    y_true = np.asarray(y_true)
+    y_score = np.asarray(y_score)
+    if y_score.ndim != 2:
+        raise ValueError(f"Expected y_score to be 2D, got shape {y_score.shape}")
+
+    num_classes = int(y_score.shape[1])
+    if num_classes <= 0:
+        raise ValueError("y_score must contain at least one class score")
+
+    k = max(1, min(int(k), num_classes))
+    if k >= num_classes:
+        return 1.0
+    if k == 1:
+        return accuracy_score(y_true, np.argmax(y_score, axis=1))
+
+    topk_idx = np.argsort(y_score, axis=1)[:, -k:]
+    return float(np.mean(np.any(topk_idx == y_true[:, None], axis=1)))
 
 class AlgorithmBase:
     """
@@ -599,11 +619,13 @@ class AlgorithmBase:
 
         # Supervised metrics
         top1 = accuracy_score(y_true, y_pred)
-        top5 = top_k_accuracy_score(y_true, y_probs, k=5)
+        score_num_classes = int(y_logits.shape[1]) if y_logits.ndim == 2 else 1
+        topk = min(5, score_num_classes)
+        top5 = _safe_top_k_accuracy(y_true, y_probs, topk)
         balanced_top1 = balanced_accuracy_score(y_true, y_pred)
-        precision = precision_score(y_true, y_pred, average='macro')
-        recall = recall_score(y_true, y_pred, average='macro')
-        F1 = f1_score(y_true, y_pred, average='macro')
+        precision = precision_score(y_true, y_pred, average='macro', zero_division=0)
+        recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
+        F1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
 
         cf_mat = confusion_matrix(y_true, y_pred, normalize='true')
         self.print_fn('confusion matrix:\n' + np.array_str(cf_mat))

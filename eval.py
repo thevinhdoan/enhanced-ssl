@@ -84,7 +84,25 @@ def _eval(model, loader, eval_unsup=False):
     return eval_dict, y_feats, y_logits, y_pred, y_probs, y_labels
 
 
-def _get_vtab(ulb_num_labels, lb_imb_ratio, ulb_imb_ratio, net, train_split, crop_ratio, img_size, alg, dset_name, num_labels, num_classes, data_dir, include_lb_to_ulb, seed, train_aug):
+def _get_vtab(
+    ulb_num_labels,
+    lb_imb_ratio,
+    ulb_imb_ratio,
+    net,
+    train_split,
+    crop_ratio,
+    img_size,
+    alg,
+    dset_name,
+    num_labels,
+    num_classes,
+    data_dir,
+    include_lb_to_ulb,
+    seed,
+    train_aug,
+    selected_classes=None,
+    remap_selected_classes=False,
+):
     args = {
         'seed': seed,
         'num_labels': num_labels,
@@ -96,7 +114,9 @@ def _get_vtab(ulb_num_labels, lb_imb_ratio, ulb_imb_ratio, net, train_split, cro
         'train_split': train_split,
         'crop_ratio': crop_ratio,
         'img_size': img_size,
-        'train_aug': train_aug
+        'train_aug': train_aug,
+        'selected_classes': selected_classes,
+        'remap_selected_classes': remap_selected_classes,
     }
     args = DotWiz(args)
     train_lb, train_ulb, val, test, ulb_lb_mask = get_vtab(args, alg, dset_name, num_labels, num_classes, data_dir, include_lb_to_ulb)
@@ -106,12 +126,13 @@ def _get_vtab(ulb_num_labels, lb_imb_ratio, ulb_imb_ratio, net, train_split, cro
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--eval_list", type=str, default="eval_list.pkl")
     args = parser.parse_args()
 
     device = args.device
 
-    print('Loading extract_pl_list.pkl')
-    with open('eval_list.pkl', 'rb') as f:
+    print(f"Loading {args.eval_list}")
+    with open(args.eval_list, 'rb') as f:
         models_to_extract_tot = pickle.load(f)
 
     models_to_extract = models_to_extract_tot
@@ -165,6 +186,11 @@ if __name__ == '__main__':
             pretrain_path = config['pretrain_path']
         else:
             pretrain_path = None
+        if 'selected_classes' in config:
+            selected_classes = config['selected_classes']
+        else:
+            selected_classes = None
+        remap_selected_classes = bool(config.get('remap_selected_classes', False))
         train_aug = 'weak'
 
         # Sanity check
@@ -179,7 +205,25 @@ if __name__ == '__main__':
 
         os.makedirs(bootstrapping_pl_path, exist_ok=True)
 
-        train_lb, train_ulb, val, test, ulb_lb_mask = _get_vtab(ulb_num_labels, lb_imb_ratio, ulb_imb_ratio, net, train_split, crop_ratio, img_size, 'extract_pl', dataset, num_labels, num_classes, data_dir, True, seed, train_aug)
+        train_lb, train_ulb, val, test, ulb_lb_mask = _get_vtab(
+            ulb_num_labels,
+            lb_imb_ratio,
+            ulb_imb_ratio,
+            net,
+            train_split,
+            crop_ratio,
+            img_size,
+            'extract_pl',
+            dataset,
+            num_labels,
+            num_classes,
+            data_dir,
+            True,
+            seed,
+            train_aug,
+            selected_classes=selected_classes,
+            remap_selected_classes=remap_selected_classes,
+        )
 
         train_ulb_noaug = copy.copy(train_ulb)
         train_ulb_strongaug = copy.copy(train_ulb)
