@@ -1,16 +1,16 @@
 [
   {
-    "base_config": "config/adaptformer/supervised/dtd/3-shot/clip/dpr-0/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 16}/lr-1e-3/config.yaml",
+    "base_config": "config/adaptformer/supervised/clevr_count/10-shot/clip/dpr-0/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 16}/lr-1e-3/config.yaml",
     "classes": [
       0,
       1
     ],
-    "dataset": "dtd",
-    "generated_config": "config/generated/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/dtd/3-shot/clip/dpr-0/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 16}/lr-1e-3/config.yaml",
-    "generated_save_dir": "saved_models/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/dtd/3-shot/clip/dpr-0/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 16}/lr-1e-3",
-    "load_path": "saved_models/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/dtd/3-shot/clip/dpr-0/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 16}/lr-1e-3/log/latest_model.pth",
+    "dataset": "clevr_count",
+    "generated_config": "config/generated/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/clevr_count/10-shot/clip/dpr-0/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 16}/lr-1e-3/config.yaml",
+    "generated_save_dir": "saved_models/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/clevr_count/10-shot/clip/dpr-0/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 16}/lr-1e-3",
+    "load_path": "saved_models/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/clevr_count/10-shot/clip/dpr-0/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 16}/lr-1e-3/log/latest_model.pth",
     "num_classes": 2,
-    "num_labels": 6,
+    "num_labels": 20,
     "run_scripts": [
       "scripts/clip/run_supervised.sh",
       "scripts/dinov2/run_supervised.sh"
@@ -18,17 +18,17 @@
     "seed": 0
   },
   {
-    "base_config": "config/lora/supervised/dtd/3-shot/clip/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/config.yaml",
+    "base_config": "config/lora/supervised/clevr_count/10-shot/clip/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/config.yaml",
     "classes": [
       0,
       1
     ],
-    "dataset": "dtd",
-    "generated_config": "config/generated/two_class_supervised/classes_0_1/seed_0/lora/supervised/dtd/3-shot/clip/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/config.yaml",
-    "generated_save_dir": "saved_models/two_class_supervised/classes_0_1/seed_0/lora/supervised/dtd/3-shot/clip/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3",
-    "load_path": "saved_models/two_class_supervised/classes_0_1/seed_0/lora/supervised/dtd/3-shot/clip/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/log/latest_model.pth",
+    "dataset": "clevr_count",
+    "generated_config": "config/generated/two_class_supervised/classes_0_1/seed_0/lora/supervised/clevr_count/10-shot/clip/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/config.yaml",
+    "generated_save_dir": "saved_models/two_class_supervised/classes_0_1/seed_0/lora/supervised/clevr_count/10-shot/clip/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3",
+    "load_path": "saved_models/two_class_supervised/classes_0_1/seed_0/lora/supervised/clevr_count/10-shot/clip/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/log/latest_model.pth",
     "num_classes": 2,
-    "num_labels": 6,
+    "num_labels": 20,
     "run_scripts": [
       "scripts/clip/run_supervised.sh",
       "scripts/dinov2/run_supervised.sh"
@@ -36,17 +36,17 @@
     "seed": 0
   },
   {
-    "base_config": "config/adaptformer/supervised/dtd/3-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 4}/lr-1e-3/config.yaml",
+    "base_config": "config/adaptformer/supervised/clevr_count/10-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 4}/lr-1e-3/config.yaml",
     "classes": [
       0,
       1
     ],
-    "dataset": "dtd",
-    "generated_config": "config/generated/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/dtd/3-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 4}/lr-1e-3/config.yaml",
-    "generated_save_dir": "saved_models/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/dtd/3-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 4}/lr-1e-3",
-    "load_path": "saved_models/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/dtd/3-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 4}/lr-1e-3/log/latest_model.pth",
+    "dataset": "clevr_count",
+    "generated_config": "config/generated/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/clevr_count/10-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 4}/lr-1e-3/config.yaml",
+    "generated_save_dir": "saved_models/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/clevr_count/10-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 4}/lr-1e-3",
+    "load_path": "saved_models/two_class_supervised/classes_0_1/seed_0/adaptformer/supervised/clevr_count/10-shot/dinov2/dpr-0.2/train-aug-strong/{'adapter_scaler': 0.1, 'adapter_bottleneck': 4}/lr-1e-3/log/latest_model.pth",
     "num_classes": 2,
-    "num_labels": 6,
+    "num_labels": 20,
     "run_scripts": [
       "scripts/clip/run_supervised.sh",
       "scripts/dinov2/run_supervised.sh"
@@ -54,17 +54,17 @@
     "seed": 0
   },
   {
-    "base_config": "config/lora/supervised/dtd/3-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/config.yaml",
+    "base_config": "config/lora/supervised/clevr_count/10-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/config.yaml",
     "classes": [
       0,
       1
     ],
-    "dataset": "dtd",
-    "generated_config": "config/generated/two_class_supervised/classes_0_1/seed_0/lora/supervised/dtd/3-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/config.yaml",
-    "generated_save_dir": "saved_models/two_class_supervised/classes_0_1/seed_0/lora/supervised/dtd/3-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3",
-    "load_path": "saved_models/two_class_supervised/classes_0_1/seed_0/lora/supervised/dtd/3-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/log/latest_model.pth",
+    "dataset": "clevr_count",
+    "generated_config": "config/generated/two_class_supervised/classes_0_1/seed_0/lora/supervised/clevr_count/10-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/config.yaml",
+    "generated_save_dir": "saved_models/two_class_supervised/classes_0_1/seed_0/lora/supervised/clevr_count/10-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3",
+    "load_path": "saved_models/two_class_supervised/classes_0_1/seed_0/lora/supervised/clevr_count/10-shot/dinov2/dpr-0/train-aug-strong/{'lora_bottleneck': 16}/lr-1e-3/log/latest_model.pth",
     "num_classes": 2,
-    "num_labels": 6,
+    "num_labels": 20,
     "run_scripts": [
       "scripts/clip/run_supervised.sh",
       "scripts/dinov2/run_supervised.sh"
