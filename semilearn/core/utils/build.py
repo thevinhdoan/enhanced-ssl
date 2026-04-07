@@ -47,6 +47,9 @@ def get_net_builder(net_name, from_name: bool, peft_config=None, vit_config=None
                 # if args is not None and hasattr(args, 'peft_config'):
                 #     _kwargs['peft_config'] = args.peft_config
                 return nets.timm_builder(model_name, peft_config, vit_config, *_args, **_kwargs)
+        elif net_name in ['qwen_builder', 'qwen_embedding_builder']:
+            def builder(*_args, **_kwargs):
+                return getattr(nets, net_name)(peft_config=peft_config, *_args, **_kwargs)
         else:
             builder = getattr(nets, net_name)
         return builder
