@@ -3,7 +3,6 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from torchvision.transforms.functional import to_pil_image
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -55,6 +54,14 @@ class QwenEmbeddingWrapper(nn.Module):
         self.peft_config = peft_config
         self.adapter = None
         self.head = nn.Linear(num_features, num_classes)
+        self.image_prompt_template = self.processor.apply_chat_template(
+            [[
+                {"role": "system", "content": [{"type": "text", "text": self.instruction}]},
+                {"role": "user", "content": [{"type": "image"}]},
+            ]],
+            add_generation_prompt=True,
+            tokenize=False,
+        )[0]
 
         self.model.eval()
         for parameter in self.model.parameters():
@@ -69,17 +76,28 @@ class QwenEmbeddingWrapper(nn.Module):
             rank = max(rank, 1)
             self.head = _LoRAHead(num_features, num_classes, rank)
 
-    def _to_pil_images(self, x: torch.Tensor):
+    def _to_pixel_tensors(self, x: torch.Tensor):
         mean = IMAGENET_MEAN.to(device=x.device, dtype=x.dtype)
         std = IMAGENET_STD.to(device=x.device, dtype=x.dtype)
-        x = (x * std + mean).clamp(0.0, 1.0)
-        return [to_pil_image(image.detach().cpu()) for image in x]
+        return (x * std + mean).clamp(0.0, 1.0).detach().cpu().float()
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
-        images = self._to_pil_images(x)
-        inputs = [{"image": image, "instruction": self.instruction} for image in images]
-        with torch.inference_mode():
-            features = self.embedder.process(inputs)
+        images = self._to_pixel_tensors(x)
+        texts = [self.image_prompt_template] * images.shape[0]
+        with torch.no_grad():
+            processed_inputs = self.processor(
+                text=texts,
+                images=images,
+                padding=True,
+                do_resize=False,
+                return_tensors='pt',
+            )
+            processed_inputs = {
+                key: value.to(self.model.device)
+                for key, value in processed_inputs.items()
+            }
+            outputs = self.embedder.forward(processed_inputs)
+            features = self.embedder._pooling_last(outputs['last_hidden_state'], outputs['attention_mask'])
         return features.float()
 
     def forward_head(self, features: torch.Tensor, pre_logits: bool = False) -> torch.Tensor:

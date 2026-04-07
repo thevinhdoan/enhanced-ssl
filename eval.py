@@ -25,15 +25,15 @@ _ROOT_DIR = os.path.abspath(os.curdir)
 _yaml = YAML()
 
 
-def _eval(model, loader, eval_unsup=False):
+def _eval(model, loader, eval_unsup=False, compute_metrics=True):
     model.eval()
-    acc = 0.0
+    acc = 0.0 if compute_metrics else None
     dset_len = len(loader.dataset)
     
     y_feats = []
     y_logits = []
     y_pred = []
-    y_probs = []
+    y_probs = [] if (eval_unsup and compute_metrics) else None
     y_labels = []
     
     _n_data_processed = 0
@@ -54,15 +54,16 @@ def _eval(model, loader, eval_unsup=False):
             
             feat = model(image, only_feat=True)
             logit = model(feat, only_fc=True)
-            prob = logit.softmax(dim=-1)
-            pred = prob.argmax(1)
+            pred = logit.argmax(1)
 
-            acc += pred.cpu().eq(target).sum().item()
+            if compute_metrics:
+                acc += pred.cpu().eq(target).sum().item()
 
             y_feats.append(feat.cpu())
             y_logits.append(logit.cpu())
             y_pred.append(pred.cpu())
-            y_probs.append(prob.cpu())
+            if y_probs is not None:
+                y_probs.append(logit.softmax(dim=-1).cpu())
             y_labels.append(target.cpu())
 
             n_processed += len(image)
@@ -70,17 +71,21 @@ def _eval(model, loader, eval_unsup=False):
     y_feats  = torch.cat(y_feats,  dim=0)
     y_logits = torch.cat(y_logits, dim=0)
     y_pred  = torch.cat(y_pred,  dim=0)
-    y_probs  = torch.cat(y_probs,  dim=0)
+    if y_probs is not None:
+        y_probs  = torch.cat(y_probs,  dim=0)
     y_labels = torch.cat(y_labels, dim=0)
 
-    acc = acc / dset_len
     assert n_processed == dset_len, f"n_processed: {n_processed}, dset_len: {dset_len}"
     
-    if eval_unsup:
-        eval_dict = unsupervised_scores(y_feats, y_logits, y_probs)
-        eval_dict['acc'] = acc
+    if not compute_metrics:
+        eval_dict = {}
     else:
-        eval_dict = {'acc': acc}
+        acc = acc / dset_len
+        if eval_unsup:
+            eval_dict = unsupervised_scores(y_feats, y_logits, y_probs)
+            eval_dict['acc'] = acc
+        else:
+            eval_dict = {'acc': acc}
     return eval_dict, y_feats, y_logits, y_pred, y_probs, y_labels
 
 
@@ -106,12 +111,18 @@ def _get_vtab(ulb_num_labels, lb_imb_ratio, ulb_imb_ratio, net, train_split, cro
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--eval_list", type=str, default="eval_list.pkl")
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--skip_bootstrapping", action="store_true")
+    parser.add_argument("--skip_metrics", action="store_true")
+    parser.add_argument("--skip_val", action="store_true")
     args = parser.parse_args()
 
     device = args.device
 
-    print('Loading extract_pl_list.pkl')
-    with open('eval_list.pkl', 'rb') as f:
+    print(f'Loading {args.eval_list}')
+    with open(args.eval_list, 'rb') as f:
         models_to_extract_tot = pickle.load(f)
 
     models_to_extract = models_to_extract_tot
@@ -177,7 +188,8 @@ if __name__ == '__main__':
         val_pl_path = os.path.join(log_path, 'val_pl.pkl')
         bootstrapping_pl_path = os.path.join(log_path, 'bootstrapping_pl')
 
-        os.makedirs(bootstrapping_pl_path, exist_ok=True)
+        if not args.skip_bootstrapping:
+            os.makedirs(bootstrapping_pl_path, exist_ok=True)
 
         train_lb, train_ulb, val, test, ulb_lb_mask = _get_vtab(ulb_num_labels, lb_imb_ratio, ulb_imb_ratio, net, train_split, crop_ratio, img_size, 'extract_pl', dataset, num_labels, num_classes, data_dir, True, seed, train_aug)
 
@@ -217,15 +229,21 @@ if __name__ == '__main__':
         model.eval()
 
         # Loaders
-        train_ulb_loader = DataLoader(train_ulb_noaug, batch_size=32, shuffle=False, num_workers=4, pin_memory=False)
+        train_ulb_loader = DataLoader(train_ulb_noaug, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=False)
         print(f'len(train_ulb_noaug): {len(train_ulb_noaug)}, len(train_ulb_loader): {len(train_ulb_loader)}')
-        train_ulb_weakaug_loader = DataLoader(train_ulb, batch_size=32, shuffle=False, num_workers=4, pin_memory=False)
-        print(f'len(train_ulb): {len(train_ulb)}, len(train_ulb_weakaug_loader): {len(train_ulb_weakaug_loader)}')
+        if not args.skip_bootstrapping:
+            train_ulb_weakaug_loader = DataLoader(train_ulb, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=False)
+            print(f'len(train_ulb): {len(train_ulb)}, len(train_ulb_weakaug_loader): {len(train_ulb_weakaug_loader)}')
 
         # Extract PL
         if '/supervised' in load_path:
             print(f'Extracting PL for {load_path}')
-            eval_dict, y_feats, y_logits, y_pred, y_probs, y_true = _eval(model, train_ulb_loader, eval_unsup=False)
+            eval_dict, y_feats, y_logits, y_pred, y_probs, y_true = _eval(
+                model,
+                train_ulb_loader,
+                eval_unsup=False,
+                compute_metrics=not args.skip_metrics,
+            )
 
             y_true = y_true.numpy()
             y_pred = y_pred.numpy()
@@ -233,8 +251,9 @@ if __name__ == '__main__':
             y_feats = y_feats.numpy()
 
             print(f'y_true.shape: {y_true.shape}, y_pred.shape: {y_pred.shape}, y_logits.shape: {y_logits.shape}, y_feats.shape: {y_feats.shape}')
-            print(f'PL accuracy: {np.mean(y_true == y_pred)}')
-            print(f'eval_dict: {eval_dict}')
+            if not args.skip_metrics:
+                print(f'PL accuracy: {np.mean(y_true == y_pred)}')
+                print(f'eval_dict: {eval_dict}')
 
             # Save pickle file
             if not os.path.exists(os.path.dirname(pl_path)):
@@ -248,55 +267,70 @@ if __name__ == '__main__':
                                 'ulb_lb_mask': ulb_lb_mask,
                                 'eval_dict': eval_dict}, f)
 
-            # Extract bootstrapping with weak augmentation
-            weak_pl_filenames = [f'weak_{i}.pkl' for i in range(10)]
-            if os.path.exists(bootstrapping_pl_path):
-                for f in os.listdir(bootstrapping_pl_path):
-                    if f in weak_pl_filenames:
-                        print(f'Existing weak PL found: {f}, removing')
-                        weak_pl_filenames.remove(f)
-            print(f'Extracting weak PL for {weak_pl_filenames}')
-            for _weak_pl_filename in weak_pl_filenames:
-                eval_dict, y_feats, y_logits, y_pred, y_probs, y_true = _eval(model, train_ulb_weakaug_loader, eval_unsup=False)
+            if args.skip_bootstrapping:
+                print('Skipping bootstrapping extraction')
+            else:
+                weak_pl_filenames = [f'weak_{i}.pkl' for i in range(10)]
+                if os.path.exists(bootstrapping_pl_path):
+                    for f in os.listdir(bootstrapping_pl_path):
+                        if f in weak_pl_filenames:
+                            print(f'Existing weak PL found: {f}, removing')
+                            weak_pl_filenames.remove(f)
+                print(f'Extracting weak PL for {weak_pl_filenames}')
+                for _weak_pl_filename in weak_pl_filenames:
+                    eval_dict, y_feats, y_logits, y_pred, y_probs, y_true = _eval(
+                        model,
+                        train_ulb_weakaug_loader,
+                        eval_unsup=False,
+                        compute_metrics=not args.skip_metrics,
+                    )
 
-                y_true = y_true.numpy()
-                y_pred = y_pred.numpy()
-                y_logits = y_logits.numpy()
-                y_feats = y_feats.numpy()
+                    y_true = y_true.numpy()
+                    y_pred = y_pred.numpy()
+                    y_logits = y_logits.numpy()
+                    y_feats = y_feats.numpy()
 
-                print(f"Pseudo-label accuracy for weak augmentation {_weak_pl_filename}: {np.mean(y_true == y_pred)}")
+                    if not args.skip_metrics:
+                        print(f"Pseudo-label accuracy for weak augmentation {_weak_pl_filename}: {np.mean(y_true == y_pred)}")
 
-                _weak_pl_path = os.path.join(bootstrapping_pl_path, _weak_pl_filename)
+                    _weak_pl_path = os.path.join(bootstrapping_pl_path, _weak_pl_filename)
 
-                print(f'Saving weak PL to to {_weak_pl_path}')
-                with open(_weak_pl_path, 'wb') as f:
-                    pickle.dump({'y_true': y_true,
-                                    'y_pred': y_pred,
-                                    'y_logits': y_logits,
-                                    'y_feats': y_feats,
-                                    'eval_dict': eval_dict}, f)
+                    print(f'Saving weak PL to to {_weak_pl_path}')
+                    with open(_weak_pl_path, 'wb') as f:
+                        pickle.dump({'y_true': y_true,
+                                        'y_pred': y_pred,
+                                        'y_logits': y_logits,
+                                        'y_feats': y_feats,
+                                        'eval_dict': eval_dict}, f)
 
-        # Get unsupervised metrics on validation set
-        val_loader = DataLoader(val, batch_size=32, shuffle=False, num_workers=0)
-        print(f'len(val): {len(val)}, len(val_loader): {len(val_loader)}')
+        if args.skip_val:
+            print('Skipping validation extraction')
+        else:
+            val_loader = DataLoader(val, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+            print(f'len(val): {len(val)}, len(val_loader): {len(val_loader)}')
 
-        val_eval_dict, val_y_feats, val_y_logits, val_y_pred, val_y_probs, val_y_true = _eval(model, val_loader, eval_unsup=True)
+            val_eval_dict, val_y_feats, val_y_logits, val_y_pred, val_y_probs, val_y_true = _eval(
+                model,
+                val_loader,
+                eval_unsup=not args.skip_metrics,
+                compute_metrics=not args.skip_metrics,
+            )
 
-        val_y_true = val_y_true.numpy()
-        val_y_pred = val_y_pred.numpy()
-        val_y_logits = val_y_logits.numpy()
-        val_y_feats = val_y_feats.numpy()
+            val_y_true = val_y_true.numpy()
+            val_y_pred = val_y_pred.numpy()
+            val_y_logits = val_y_logits.numpy()
+            val_y_feats = val_y_feats.numpy()
 
-        print(f'val_y_true.shape: {val_y_true.shape}, val_y_pred.shape: {val_y_pred.shape}, val_y_logits.shape: {val_y_logits.shape}, val_y_feats.shape: {val_y_feats.shape}')
-        print(f'PL accuracy: {np.mean(val_y_true == val_y_pred)}')
-        print(f'val_eval_dict: {val_eval_dict}')
+            print(f'val_y_true.shape: {val_y_true.shape}, val_y_pred.shape: {val_y_pred.shape}, val_y_logits.shape: {val_y_logits.shape}, val_y_feats.shape: {val_y_feats.shape}')
+            if not args.skip_metrics:
+                print(f'PL accuracy: {np.mean(val_y_true == val_y_pred)}')
+                print(f'val_eval_dict: {val_eval_dict}')
 
-        # Save pickle file
-        print(f'Saving PL to to {val_pl_path}')
-        with open(val_pl_path, 'wb') as f:
-            pickle.dump({'y_true': val_y_true, 
-                            'y_pred': val_y_pred, 
-                            'y_logits': val_y_logits, 
-                            'y_feats': val_y_feats,
-                            'eval_dict': val_eval_dict}, f)
+            print(f'Saving PL to to {val_pl_path}')
+            with open(val_pl_path, 'wb') as f:
+                pickle.dump({'y_true': val_y_true, 
+                                'y_pred': val_y_pred, 
+                                'y_logits': val_y_logits, 
+                                'y_feats': val_y_feats,
+                                'eval_dict': val_eval_dict}, f)
         print(f'PL extraction done for {load_path}')
