@@ -14,6 +14,23 @@ yaml = YAML()
 
 datasets = ['dtd', 'sun397', 'resisc45', 'diabetic_retinopathy', 'clevr_count', 'kitti']
 _DB_PATH = './exp_result.db'
+_DEFAULT_NETS = ['dinov2', 'clip', 'qwen3vl']
+_NET_CONFIGS = {
+    'dinov2': {
+        'net_name': 'timm/vit_base_patch14_reg4_dinov2.lvd142m',
+        'extra_fields': {},
+    },
+    'clip': {
+        'net_name': 'timm/vit_base_patch16_clip_224.openai',
+        'extra_fields': {},
+    },
+    'qwen3vl': {
+        'net_name': 'qwen_embedding_builder',
+        'extra_fields': {
+            'pretrained_path': 'Qwen3-VL-Embedding-2B',
+        },
+    },
+}
 
 epoch_dict = {
     "dtd": {
@@ -179,6 +196,10 @@ def expand_fields(d):
     return result
 
 
+def _parse_csv_list(value):
+    return [item.strip() for item in value.split(',') if item.strip()]
+
+
 def get_pet_sources(strategy, dset, shot, peft, net, rows):
     sources = []
     sources_rows = []
@@ -290,9 +311,25 @@ peft_params = {
 datasets = ['dtd', 'sun397', 'resisc45', 'diabetic_retinopathy', 'clevr_count', 'kitti']
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--db_path', default=_DB_PATH)
+    parser.add_argument('--nets', default=','.join(_DEFAULT_NETS))
+    parser.add_argument('--datasets', default=','.join(datasets))
+    parser.add_argument('--strategies', default='self-training,ensembled,ensembled-across-nets')
+    parser.add_argument('--disable_bootstrapping_nets', default='qwen3vl')
+    args = parser.parse_args()
+
+    selected_nets = _parse_csv_list(args.nets)
+    selected_datasets = _parse_csv_list(args.datasets)
+    strategy_space = _parse_csv_list(args.strategies)
+    disable_bootstrapping_nets = set(_parse_csv_list(args.disable_bootstrapping_nets))
+
+    invalid_nets = [net for net in selected_nets if net not in _NET_CONFIGS]
+    if invalid_nets:
+        raise ValueError(f'Unsupported nets: {invalid_nets}. Supported: {sorted(_NET_CONFIGS)}')
     
     ## Load exp_result
-    conn = sqlite3.connect(_DB_PATH)
+    conn = sqlite3.connect(args.db_path)
     c = conn.cursor()
     # Load as table
     c.execute('SELECT * FROM exp_result')
@@ -301,14 +338,16 @@ if __name__ == '__main__':
 
     alg = 'pet'
     template_path = f'./config/template/pet.yaml'
-    strategy_space = ['self-training', 'ensembled', 'ensembled-across-nets']
-
-    for net in ['dinov2', 'clip']:
-        for dset in datasets:
+    
+    for net in selected_nets:
+        for dset in selected_datasets:
             for peft in ['adaptformer', 'lora']:
                 for shot, arg in epoch_dict[dset].items():
                     for strategy in strategy_space:
                         pet_sources, pet_sources_rows = get_pet_sources(strategy, dset, shot, peft, net, rows)
+                        if len(pet_sources) == 0:
+                            print(f"[SKIP] No PET sources for peft={peft}, strategy={strategy}, dset={dset}, shot={shot}, net={net}")
+                            continue
                             
                         _peft_params = peft_params[peft]
                         
@@ -323,10 +362,8 @@ if __name__ == '__main__':
                         img_size = 224
                         layer_decay = 1.0
 
-                        if net == 'dinov2':
-                            net_name = 'timm/vit_base_patch14_reg4_dinov2.lvd142m'
-                        elif net == 'clip':
-                            net_name = 'timm/vit_base_patch16_clip_224.openai'
+                        net_cfg = _NET_CONFIGS[net]
+                        net_name = net_cfg['net_name']
                         _config = template.copy()
                         _config['lr'] = float(0.0001)
                         _config['epoch'] = epoch
@@ -343,7 +380,8 @@ if __name__ == '__main__':
                         _config['layer_decay'] = layer_decay
                         _config['net'] = net_name
                         _config['logits_ensemble'] = "voting"
-                        _config['bootstrapping'] = True
+                        _config['bootstrapping'] = not any(row[4] in disable_bootstrapping_nets for row in pet_sources_rows)
+                        _config.update(net_cfg['extra_fields'])
                         
                         _config['w_alpha'] = 0.0
                         _config['s_alpha'] = 0.0
