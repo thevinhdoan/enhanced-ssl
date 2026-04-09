@@ -537,10 +537,15 @@ class AlgorithmBase:
         start = time.time()
 
         self.model.eval()
-        self.ema.apply_shadow()
+        use_ema = self.ema is not None
+        if use_ema:
+            self.ema.apply_shadow()
 
         if eval_dest not in self.loader_dict:
             self.print_fn(f"Loader for {eval_dest} not found, skipping evaluation")
+            if use_ema:
+                self.ema.restore()
+            self.model.train()
             return
         eval_loader = self.loader_dict[eval_dest]
 
@@ -552,44 +557,50 @@ class AlgorithmBase:
         y_logits = []
         y_feats = []
 
-        # idx = []
-        print(f'len(eval_loader): {len(eval_loader)}')
-        print(f'len(eval_loader.dataset): {len(eval_loader.dataset)}')
-        with torch.no_grad():
-            for i, data in enumerate(eval_loader):
-                _start = time.time()
-                idx_lb = data['idx_lb']
-                # has attribute idx_list
-                # _idx = [eval_loader.dataset.idx_list[i] for i in idx_lb]
-                x = data['x_lb']
-                y = data['y_lb']
-                if isinstance(x, dict):
-                    x = {k: v.cuda(self.gpu) for k, v in x.items()}
-                else:
-                    x = x.cuda(self.gpu)
-                y = y.cuda(self.gpu)
+        try:
+            # idx = []
+            print(f'len(eval_loader): {len(eval_loader)}')
+            print(f'len(eval_loader.dataset): {len(eval_loader.dataset)}')
+            with torch.no_grad():
+                for i, data in enumerate(eval_loader):
+                    _start = time.time()
+                    idx_lb = data['idx_lb']
+                    # has attribute idx_list
+                    # _idx = [eval_loader.dataset.idx_list[i] for i in idx_lb]
+                    x = data['x_lb']
+                    y = data['y_lb']
+                    if isinstance(x, dict):
+                        x = {k: v.cuda(self.gpu) for k, v in x.items()}
+                    else:
+                        x = x.cuda(self.gpu)
+                    y = y.cuda(self.gpu)
 
-                num_batch = y.shape[0]
-                total_num += num_batch
+                    num_batch = y.shape[0]
+                    total_num += num_batch
 
-                out = self.model(x)
-                logits = out[out_key]
-                feat = out['feat']
-                
-                loss = F.cross_entropy(logits, y, reduction='mean', ignore_index=-1)
-                _y_true = y.cpu().tolist()
-                _y_pred = torch.max(logits, dim=-1)[1].cpu().tolist()
-                _y_logits = logits.cpu().numpy()
-                _y_feats = feat.cpu().numpy()
-                _y_probs = torch.softmax(logits, dim=-1).cpu().tolist()
-                y_true.extend(_y_true)
-                y_pred.extend(_y_pred)
-                y_logits.append(_y_logits)
-                y_feats.append(_y_feats)
-                y_probs.extend(_y_probs)
-                total_loss += loss.item() * num_batch
-                _end = time.time()
-                # print(f"Time for batch {i}: {_end - _start}")
+                    out = self.model(x)
+                    logits = out[out_key]
+                    feat = out['feat']
+                    
+                    loss = F.cross_entropy(logits, y, reduction='mean', ignore_index=-1)
+                    _y_true = y.cpu().tolist()
+                    _y_pred = torch.max(logits, dim=-1)[1].cpu().tolist()
+                    _y_logits = logits.cpu().numpy()
+                    _y_feats = feat.cpu().numpy()
+                    _y_probs = torch.softmax(logits, dim=-1).cpu().tolist()
+                    y_true.extend(_y_true)
+                    y_pred.extend(_y_pred)
+                    y_logits.append(_y_logits)
+                    y_feats.append(_y_feats)
+                    y_probs.extend(_y_probs)
+                    total_loss += loss.item() * num_batch
+                    _end = time.time()
+                    # print(f"Time for batch {i}: {_end - _start}")
+        finally:
+            if use_ema:
+                self.ema.restore()
+            self.model.train()
+
         y_true = np.array(y_true)
         y_pred = np.array(y_pred)
         y_logits = np.concatenate(y_logits)
@@ -607,8 +618,6 @@ class AlgorithmBase:
 
         cf_mat = confusion_matrix(y_true, y_pred, normalize='true')
         self.print_fn('confusion matrix:\n' + np.array_str(cf_mat))
-        self.ema.restore()
-        self.model.train()
         
         eval_dict[f'{eval_dest}/total_num'] = total_num
         eval_dict[f'{eval_dest}/loss'] = total_loss / total_num

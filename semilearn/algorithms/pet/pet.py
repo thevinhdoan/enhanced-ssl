@@ -3,6 +3,7 @@
 
 from semilearn.core import AlgorithmBase
 from semilearn.core.utils import ALGORITHMS
+from semilearn.core.utils import EMA
 from .pet_hook import PETHook
 
 import copy
@@ -140,6 +141,10 @@ class PET(AlgorithmBase):
         if 'module' in list(self.ema_model.state_dict().keys())[0]:
             _ema_model_state_dict = {f'module.{k}': v for k, v in _ema_model_state_dict.items()}
         self.ema_model.load_state_dict(_ema_model_state_dict)
+        if self.ema is not None:
+            self.ema = EMA(self.model, self.ema_m)
+            self.ema.register()
+            self.ema.load(self.ema_model)
 
     def reset_optim(self):
         self.print_fn("Resetting optimizer and scheduler")
@@ -374,6 +379,8 @@ class PET(AlgorithmBase):
 
 
     def train(self):
+        self.model.train()
+        self.call_hook("before_run")
         if self.args.pretrained_path != '':
             self.print_fn(f"Using pretrained model from {self.args.pretrained_path}, performing initial evaluation")
             eval_dict = self.evaluate('eval')

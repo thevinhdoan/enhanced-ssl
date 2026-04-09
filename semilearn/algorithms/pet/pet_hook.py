@@ -130,7 +130,7 @@ class PETHook(Hook):
 
             log_path = os.path.join(_ROOT_DIR, save_dir, save_name)
             # pl_path = os.path.join(log_path, 'pl.pkl')
-            pl_path = os.path.join(..., source.lstrip("config/").rstrip("/config.yaml"), "log", "pl.pkl")
+            pl_path = os.path.join("saved_models", source.lstrip("config/").rstrip("/config.yaml"), "log", "pl.pkl")
 
             assert os.path.exists(pl_path), f'Pseudo labels for {source} does not exist. '
 
@@ -143,7 +143,7 @@ class PETHook(Hook):
             predicts[source] = predict
             if args.bootstrapping:
                 # bootstrapping_pl_path = os.path.join(log_path, 'bootstrapping_pl')
-                bootstrapping_pl_path = os.path.join(..., source.lstrip("config/").rstrip("/config.yaml"), "log", "bootstrapping_pl")
+                bootstrapping_pl_path = os.path.join("saved_models", source.lstrip("config/").rstrip("/config.yaml"), "log", "bootstrapping_pl")
                 y_logits = np.zeros(predict['y_logits'].shape)
                 n = 0
                 for file in os.listdir(bootstrapping_pl_path):
